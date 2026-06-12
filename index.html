@@ -133,9 +133,14 @@
     .floater.dmg-in { color: #ff6b6b; }
     .floater.heal { color: #69db7c; }
     .floater.magic{ color: #b197fc; }
-    .floater.miss { color: #adb5bd; font-size: 13px; }
-    .floater.crit { color: #ffd43b; font-size: 20px; }
+    .floater.miss { color: #adb5bd; font-size: 13px; font-style: italic; }
+    .floater.crit { color: #ffd43b; font-size: 22px; text-shadow: 0 1px 3px #000, 0 0 10px rgba(255,170,0,.9); animation: crit-pop .28s ease-out; }
     .floater.xp   { color: #d0bfff; font-size: 13px; }
+    @keyframes crit-pop {
+      0%   { transform: translate(-50%, -50%) scale(2.4); }
+      60%  { transform: translate(-50%, -50%) scale(0.9); }
+      100% { transform: translate(-50%, -50%) scale(1); }
+    }
 
     /* ---------- dialog / windows ---------- */
     #dialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 460px; max-height: 70vh; padding: 14px; display: none; z-index: 100; }

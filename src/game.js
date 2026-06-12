@@ -9,8 +9,11 @@ import { treeAt, env } from './world.js';
 import * as API from './api.js';
 import * as Socket from './socket.js';
 import * as Puppets from './puppets.js';
+import * as FX from './effects.js';
+import { spawnBurst } from './effects.js';
+export { spawnBurst };
 
-export const G = { now: 0, particles: [], targetRing: null, pendingInteract: null, combatTimer: 0, saveTimer: 0 };
+export const G = { now: 0, targetRing: null, pendingInteract: null, combatTimer: 0, saveTimer: 0 };
 
 // =====================================================================
 // stats
@@ -289,7 +292,7 @@ export function applyDamage(target, amount, src, { magic = false, crit = false, 
   if (!target.alive) return;
   amount = Math.max(1, Math.round(amount));
   target.hp = Math.max(0, target.hp - amount);
-  target.hitFlash = 0.18;
+  FX.tintFlash(target, crit ? 0xffd43b : (magic ? 0x9775fa : 0xff5544));
   target.sleep = 0;
   if (target.kind === 'monster') {
     if (!target.aggroOn || !target.aggroOn.alive) target.aggroOn = src;
@@ -323,7 +326,7 @@ function meleeSwing(att, def) {
   // hit chance
   const hitCh = clamp(0.85 + (att.level - def.level) * 0.02 - ds.eva * 0.004, 0.35, 0.97);
   if (Math.random() > hitCh) {
-    UI.floater(def, 'miss', 'miss');
+    UI.floater(def, 'Miss', 'miss');
     if (att === S.player || def === S.player || att.kind === 'companion' || def.kind === 'companion') {
       UI.log(`${cap(tname(att))} misses ${tname(def)}.`, def.isFriendly() ? 'dmg-in' : 'cbt');
     }
@@ -581,7 +584,7 @@ function resolveAction(actor, actionId, target) {
     UI.log(`${actor.name} uses ${a.name}.`, 'cbt');
     applyDamage(target, total, actor, { crit: !!sneak });
     if (a.debuff === 'armorbreak') { target.buffs.armorbreak = { t: 20 }; UI.log(`${cap(tname(target))}'s armor is shattered!`, 'magic'); }
-    spawnBurst(target.pos, 0xffa94d, 20, 2);
+    FX.weaponSkillEffect(target, a.power);
   } else if (a.type === 'dmg') {
     let dmg = a.power * (8 + as.matk * 1.6) * rand(0.92, 1.08);
     const ds = statsOf(target);
@@ -590,7 +593,7 @@ function resolveAction(actor, actionId, target) {
     applyDamage(target, dmg, actor, { magic: true });
     if (a.dot) { target.dot = { dps: 1.2, t: a.dot, src: actor, dia: true }; }
     if (a.slow) { target.buffs.slowed = { t: 6 }; }
-    spawnBurst(target.pos, actionId.startsWith('fire') ? 0xff6b35 : actionId.startsWith('blizz') ? 0x74c0fc : actionId === 'banish' || actionId === 'dia' ? 0xfff3bf : 0xb08968, 18, 1.8);
+    FX.spellEffect(actionId, target, actor);
   } else if (a.type === 'heal') {
     const amount = Math.round(a.power * (6 + as.mnd * 1.5) * rand(0.95, 1.05));
     const healed = Math.min(amount, target.maxhp - target.hp);
@@ -598,16 +601,16 @@ function resolveAction(actor, actionId, target) {
     UI.log(`${actor.name} ${a.kind === 'spell' ? 'casts' : 'uses'} ${a.name}.`, 'magic');
     UI.log(`${cap(tname(target))} recovers ${healed} hit points.`, 'heal');
     UI.floater(target, healed, 'heal');
-    spawnBurst(target.pos, 0x69db7c, 14, 1.8);
+    FX.spellEffect(actionId, target, actor);
   } else if (a.type === 'buff') {
     const targets = a.party ? S.party.filter(m => m.alive && actor.distTo(m) < (a.range || 14)) : [actor];
     for (const t of targets) t.buffs[a.buff] = { t: a.dur };
     UI.log(`${actor.name} ${a.kind === 'spell' ? 'casts' : 'uses'} ${a.name}.`, 'magic');
-    spawnBurst(actor.pos, 0x99e9f2, 12, 1.6);
+    for (const t of targets) FX.spellEffect(actionId, t, actor);
   } else if (a.type === 'sleep') {
-    if (target.def && target.def.boss) { UI.log(`${cap(tname(target))} resists the spell!`, 'magic'); }
+    if (target.def && target.def.boss) { UI.log(`${cap(tname(target))} resists the spell!`, 'magic'); UI.floater(target, 'Resist', 'miss'); }
     else { target.sleep = a.dur; target.aggroOn = null; UI.log(`${cap(tname(target))} falls asleep.`, 'magic'); }
-    spawnBurst(target.pos, 0xb197fc, 12, 1.5);
+    FX.spellEffect(actionId, target, actor);
   } else if (a.type === 'enmity') {
     target.aggroOn = actor;
     UI.log(`${actor.name} provokes ${tname(target)}!`, 'cbt');
@@ -842,45 +845,6 @@ export function npcBless() {
 }
 
 // =====================================================================
-// particles
-// =====================================================================
-export function spawnBurst(pos, color, n = 12, spread = 1.5) {
-  const geo = new THREE.BufferGeometry();
-  const verts = new Float32Array(n * 3);
-  const vels = [];
-  for (let i = 0; i < n; i++) {
-    verts[i * 3] = pos.x; verts[i * 3 + 1] = pos.y + 1; verts[i * 3 + 2] = pos.z;
-    vels.push(new THREE.Vector3(rand(-1, 1), rand(0.4, 1.6), rand(-1, 1)).multiplyScalar(spread * 2));
-  }
-  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-  const mat = new THREE.PointsMaterial({ color, size: 0.22, transparent: true, opacity: 1, depthWrite: false });
-  const pts = new THREE.Points(geo, mat);
-  S.scene.add(pts);
-  G.particles.push({ pts, vels, t: 0, life: 0.8 });
-}
-
-function updateParticles(dt) {
-  for (let i = G.particles.length - 1; i >= 0; i--) {
-    const p = G.particles[i];
-    p.t += dt;
-    const pos = p.pts.geometry.attributes.position;
-    for (let j = 0; j < p.vels.length; j++) {
-      pos.array[j * 3] += p.vels[j].x * dt;
-      pos.array[j * 3 + 1] += p.vels[j].y * dt;
-      pos.array[j * 3 + 2] += p.vels[j].z * dt;
-      p.vels[j].y -= 3.5 * dt;
-    }
-    pos.needsUpdate = true;
-    p.pts.material.opacity = 1 - p.t / p.life;
-    if (p.t >= p.life) {
-      S.scene.remove(p.pts);
-      p.pts.geometry.dispose(); p.pts.material.dispose();
-      G.particles.splice(i, 1);
-    }
-  }
-}
-
-// =====================================================================
 // movement & animation helpers
 // =====================================================================
 function moveEntity(e, dirX, dirZ, dt, speedMul = 1) {
@@ -975,12 +939,6 @@ function animateEntity(e, dt) {
   
   e.mesh.position.y = lerp(e.mesh.position.y, targetY, dt * 8);
   e.mesh.rotation.x = lerp(e.mesh.rotation.x, targetRotX, dt * 8);
-  
-  // hit flash
-  if (e.hitFlash > 0) {
-    e.hitFlash -= dt;
-    if (e.mesh) e.mesh.traverse(o => { if (o.isMesh && o.material.emissive) o.material._flash = true; });
-  }
 }
 
 // face smoothly toward heading
@@ -1016,7 +974,7 @@ export function updateGame(dt) {
   }
   updateCasting(dt);
   updateBuffsAndRegen(dt);
-  updateParticles(dt);
+  FX.updateEffects(dt);
 
   // animations & headings
   if (p) p.isMoving = p.moving;
@@ -1244,6 +1202,8 @@ function updateMonster(m, dt) {
           UI.log('Gorthak rears up and slams the earth!', 'dmg-in');
           for (const pm of S.party) if (pm.alive && m.distTo(pm) < 6) applyDamage(pm, statsOf(m).atk * 0.8 * rand(0.9, 1.1), m, {});
           spawnBurst(m.pos, 0x9b6cd6, 26, 3);
+          FX.spawnRing(m.pos, 0x9b6cd6, 5, 0.5);
+          FX.addShakeAt(m.pos, 0.5);
         }
       }
     }

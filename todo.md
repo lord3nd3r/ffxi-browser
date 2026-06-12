@@ -88,16 +88,17 @@ This checklist outlines the progressive phases required to convert the single-pl
 
 ---
 
-## ✨ Phase 5: Combat & Spell Visual Polish
+## ✨ Phase 5: Combat & Spell Visual Polish ✅ DONE
 *Goal: Make hits, casts, and effects read clearly at a glance. Independent of the multiplayer work above — can be done anytime, single-player or not.*
 
-- [ ] **Per-element spell effects**
-  - Today [tryAction](file:///home/ender/ffxi-browser/src/game.js#L548) plays a generic `Spellcast_Shoot` animation for all WHM/BLM spells and reuses one particle burst ([G.particles](file:///home/ender/ffxi-browser/src/game.js#L797)).
-  - Give each element a distinct particle color/shape/travel effect: Stone (earth chunks arcing up), Blizzard (ice shards + slow frost trail), Fire (rising embers/flash), Cure/Banish (light pillar), Sleep (drifting z/dust cloud).
-- [ ] **Weapon skill flourishes**
-  - On `kind === 'ws'` hits, add a brief camera shake / flash / radial burst scaled to the weapon skill's `power`, so a Fast Blade reads as bigger than a normal swing.
-- [ ] **Damage & status feedback**
-  - Extend [UI.floater](file:///home/ender/ffxi-browser/src/ui.js#L70) (currently plain numbers) with crit/miss styling (color, size, "Miss"/"Resist" text) and stacked offsets so simultaneous hits from a 3-person party don't overlap illegibly.
-  - Add a brief tint flash on a unit's model when it takes damage or lands a crit.
-- [ ] **Buff/debuff indicators**
-  - Small persistent particle auras or icon overlays for active buffs (Berserk, Protect, sneak attack, Dia DoT) tied to the `e.buffs` map in [updateBuffsAndRegen](file:///home/ender/ffxi-browser/src/game.js#L1223), so effects are visible without checking the party frame.
+- [x] **Per-element spell effects**
+  - New `src/effects.js` module: configurable particle system (gravity, drag, additive blending, spawn jitter), expanding shockwave rings, additive glow sprites, and travelling spell bolts with particle trails. Absorbed `spawnBurst`/`updateParticles` from `game.js` (re-exported for compatibility).
+  - Element composites: Stone/Stone II (earth chunks arcing up + dust + ground ring, II adds shake), Fire & Blizzard (glowing bolt flies caster→target, then rising embers/flash or ice shards + lingering frost mist), Cure/Banish/Dia/buffs (rising light pillars in their own colors), Sleep (slow drifting purple dust).
+  - Works both offline (`resolveAction`) and server-authoritative (`visual:hit` handler in `main.js` routes by `actionId`).
+- [x] **Weapon skill flourishes**
+  - `weaponSkillEffect()`: additive glow flash + radial particle burst + expanding ground shockwave ring, all scaled to the WS `power`; camera shake scaled by power and attenuated by distance to the player (applied in `updateCamera`, works in first-person too). Gorthak's AoE stomp also shakes the screen.
+- [x] **Damage & status feedback**
+  - Floaters: "Miss" (italic) and "Resist" text, bigger crits with a scale-pop keyframe animation and golden glow; near-simultaneous floaters on the same target stack vertically instead of overlapping.
+  - `tintFlash()`: brief emissive flash on the model when hit — red for physical, lavender for magic, gold for crits. Materials are lazily cloned per entity (SkeletonUtils clones share materials, so without this every twin monster would flash). Replaces the old dead `hitFlash` code.
+- [x] **Buff/debuff indicators**
+  - Persistent particle auras: every 0.3s each active effect emits colored motes — rising for buffs (Berserk red, Boost orange, Protect cyan, Dodge teal, Defender blue, Flee white), low mist for Sneak Attack & sleeping monsters, falling drips for debuffs (Armor Break gold, Slow frost-blue, Dia DoT golden).

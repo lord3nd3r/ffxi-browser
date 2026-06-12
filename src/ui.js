@@ -115,7 +115,11 @@ export function floater(entOrPos, text, cls = 'dmg') {
   el.textContent = text;
   document.body.appendChild(el);
   const pos = entOrPos.pos ? entOrPos.pos : entOrPos;
-  floaters.push({ el, x: pos.x, y: (pos.y || 0) + 1.9, z: pos.z, t: 0, life: 1.1, jx: (Math.random() - 0.5) * 40 });
+  // stack near-simultaneous floaters on the same target so a 3-person
+  // party's hits don't overlap into an unreadable blob
+  let stack = 0;
+  for (const f of floaters) if (f.t < 0.45 && Math.hypot(f.x - pos.x, f.z - pos.z) < 1.2) stack++;
+  floaters.push({ el, x: pos.x, y: (pos.y || 0) + 1.9 + stack * 0.55, z: pos.z, t: 0, life: 1.1, jx: (Math.random() - 0.5) * 40 });
 }
 
 const v3 = new THREE.Vector3();

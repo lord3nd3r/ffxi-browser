@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { S, clamp, lerp } from './state.js';
 import { G, setTarget, tabTarget, requestInteract, useHotbarSlot } from './game.js';
+import { getShake } from './effects.js';
 import * as UI from './ui.js';
 
 const ray = new THREE.Raycaster();
@@ -188,6 +189,8 @@ export function updateCamera(dt) {
     );
     S.camera.position.copy(head);
     S.camera.lookAt(look);
+    const sh1 = getShake();
+    S.camera.position.x += sh1.x; S.camera.position.y += sh1.y; S.camera.position.z += sh1.z;
     return;
   }
   p.mesh.visible = true;
@@ -204,4 +207,6 @@ export function updateCamera(dt) {
 
   S.camera.position.lerp(camPos, Math.min(1, dt * 9));
   S.camera.lookAt(p.pos.x, p.pos.y + 1.4, p.pos.z);
+  const sh = getShake();
+  S.camera.position.x += sh.x; S.camera.position.y += sh.y; S.camera.position.z += sh.z;
 }

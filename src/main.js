@@ -10,6 +10,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { S } from './state.js';
 import { initWorld, updateDayCycle } from './world.js';
 import { initGame, updateGame, loadGame, saveGame, respawnPlayer, setTarget, spawnBurst, findActor } from './game.js';
+import * as FX from './effects.js';
 import { initControls, updateCamera } from './controls.js';
 import * as UI from './ui.js';
 import { STARTER_WEAPON, ACTIONS } from './data.js';
@@ -248,7 +249,7 @@ function startGame(charData, saved) {
           let floaterText = damage;
           let floaterStyle = 'dmg';
           if (miss) {
-            floaterText = 'miss';
+            floaterText = 'Miss';
             floaterStyle = 'miss';
           } else if (heal) {
             floaterText = damage;
@@ -269,10 +270,14 @@ function startGame(charData, saved) {
             floaterStyle = 'dmg-in';
           }
           UI.floater(target, floaterText, floaterStyle);
-          if (!miss && !heal && !buff) {
-            target.hitFlash = 0.18;
-            const color = magic ? 0x9b6cd6 : (crit ? 0xffea7a : 0xffffff);
-            spawnBurst(target.mesh.position, color, crit ? 16 : 8, 1.2);
+          const act = actionId ? ACTIONS[actionId] : null;
+          if (heal || buff || sleep) {
+            FX.spellEffect(actionId || (heal ? 'cure' : buff ? 'protect' : 'sleep'), target, actor);
+          } else if (!miss) {
+            FX.tintFlash(target, crit ? 0xffd43b : (magic ? 0x9775fa : 0xff5544));
+            if (act && act.kind === 'ws') FX.weaponSkillEffect(target, act.power || 2);
+            else if (act && act.kind === 'spell') FX.spellEffect(actionId, target, actor);
+            else spawnBurst(target.mesh.position, crit ? 0xffea7a : 0xffffff, crit ? 16 : 8, 1.2);
           }
         }
         const actorName = actor ? actor.name : (actorId || 'Someone');
