@@ -5,7 +5,7 @@ import { S, clamp, lerp, rand, irand, pick } from './state.js';
 import { JOBS, ACTIONS, ITEMS, MONSTERS, SPAWNS, NPCS, QUESTS, RECIPES, VENDOR_STOCK, expToNext, MAX_LEVEL, STARTER_WEAPON, jobActions } from './data.js';
 import { Entity, makeNameplate, spawnMonster, makeCharacterModel, setLoopAnim, playOnce } from './entities.js';
 import * as UI from './ui.js';
-import { treeAt, env } from './world.js';
+import { env, resolveCollision, findOpenSpot, addCollider } from './world.js';
 import * as API from './api.js';
 import * as Socket from './socket.js';
 import * as Puppets from './puppets.js';
@@ -126,6 +126,7 @@ function addCompanion(c, pos) {
 }
 
 function spawnAlly(c, spot) {
+  spot = findOpenSpot(spot.x, spot.z);
   const e = new Entity({ kind: 'npc', name: c.name, npc: { id: 'ally_' + c.name, name: c.name, role: 'ally', ally: c, x: spot.x, z: spot.z } });
   const group = giveModel(e, c.model, { appearance: c.appearance });
   const plate = makeNameplate(c.name, '#8fd3a8');
@@ -185,7 +186,8 @@ export function initGame(charData) {
     for (const sp of SPAWNS) {
       for (let i = 0; i < sp.count; i++) {
         const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * sp.area.r;
-        spawnMonster(sp.monster, sp.area.x + Math.cos(a) * r, sp.area.z + Math.sin(a) * r);
+        const spot = findOpenSpot(sp.area.x + Math.cos(a) * r, sp.area.z + Math.sin(a) * r);
+        spawnMonster(sp.monster, spot.x, spot.z);
       }
     }
   }
@@ -203,7 +205,8 @@ export function initGame(charData) {
     plate.position.y = n.small ? 1.6 : 2.35;
     group.add(plate);
     e.plate = plate;
-    group.position.set(n.x, S.heightAt(n.x, n.z), n.z);
+    const spot = findOpenSpot(n.x, n.z);   // never inside a stall, wall or boulder
+    group.position.set(spot.x, S.heightAt(spot.x, spot.z), spot.z);
     group.rotation.y = rand(0, Math.PI * 2);
     S.scene.add(group);
     S.npcs.push(e);
@@ -235,6 +238,7 @@ export function initGame(charData) {
 function buildNodes() {
   let logIdx = 1, minIdx = 1, herbIdx = 1;
   const mk = (type, x, z) => {
+    ({ x, z } = findOpenSpot(x, z));   // don't bury a node inside a random boulder
     let mesh;
     if (type === 'logging') {
       mesh = new THREE.Group();
@@ -255,6 +259,7 @@ function buildNodes() {
     mesh.position.set(x, S.heightAt(x, z), z);
     S.scene.add(mesh);
     const id = type === 'logging' ? `log_${logIdx++}` : type === 'mining' ? `min_${minIdx++}` : `herb_${herbIdx++}`;
+    addCollider(x, z, type === 'logging' ? 1.6 : type === 'mining' ? 0.8 : 0.5);
     S.nodes.push({ id, type, x, z, mesh, sparkle, available: true, respawnT: 0 });
   };
   mk('logging', 42, 38); mk('logging', 60, 55); mk('logging', 50, 62); mk('logging', 68, 40);
@@ -852,16 +857,9 @@ function moveEntity(e, dirX, dirZ, dt, speedMul = 1) {
   let nx = e.pos.x + dirX * sp * dt;
   let nz = e.pos.z + dirZ * sp * dt;
   nx = clamp(nx, -94, 94); nz = clamp(nz, -94, 94);
-  // tree collision (cheap circle push)
-  for (let i = 0; ; i++) {
-    const t = treeAt(i); if (!t) break;
-    const dx = nx - t.x, dz = nz - t.z;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < t.r * t.r && d2 > 0.0001) {
-      const d = Math.sqrt(d2);
-      nx = t.x + dx / d * t.r; nz = t.z + dz / d * t.r;
-    }
-  }
+  // static obstacles: trees, rocks, walls, props (circle/box push from world.js)
+  const rc = resolveCollision(nx, nz);
+  nx = rc.x; nz = rc.z;
   e.pos.x = nx; e.pos.z = nz;
   e.pos.y = S.heightAt(nx, nz);
   e.heading = Math.atan2(dirX, dirZ);

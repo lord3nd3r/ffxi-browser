@@ -76,8 +76,76 @@ export function terrainHeight(x, z) {
   return h;
 }
 
-const treePositions = [];
-export function treeAt(i) { return treePositions[i]; }
+// ---------- static obstacle colliders ----------
+// circles {x,z,r} for trees/rocks/posts/columns, AABBs for the town walls.
+// Everything solid registers here at build time; moveEntity resolves against it.
+const circles = [];
+const boxes = [];
+export function addCollider(x, z, r) { circles.push({ x, z, r }); }
+function addBox(x, z, w, d, pad = 0.3) { boxes.push({ minX: x - w / 2 - pad, maxX: x + w / 2 + pad, minZ: z - d / 2 - pad, maxZ: z + d / 2 + pad }); }
+const _bb = new THREE.Box3(), _sz = new THREE.Vector3(), _ct = new THREE.Vector3();
+function addObjectCollider(obj, shrink = 0.8) {
+  _bb.setFromObject(obj);
+  _bb.getSize(_sz); _bb.getCenter(_ct);
+  addCollider(_ct.x, _ct.z, Math.max(0.45, (_sz.x + _sz.z) / 4 * shrink));
+}
+const _rc = { x: 0, z: 0 };
+export function resolveCollision(nx, nz) {
+  for (const c of circles) {
+    const dx = nx - c.x, dz = nz - c.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < c.r * c.r && d2 > 0.0001) {
+      const d = Math.sqrt(d2);
+      nx = c.x + dx / d * c.r; nz = c.z + dz / d * c.r;
+    }
+  }
+  for (const b of boxes) {
+    if (nx > b.minX && nx < b.maxX && nz > b.minZ && nz < b.maxZ) {
+      // push out along the axis of least penetration (lets you slide along walls)
+      const dxl = nx - b.minX, dxr = b.maxX - nx, dzl = nz - b.minZ, dzr = b.maxZ - nz;
+      const m = Math.min(dxl, dxr, dzl, dzr);
+      if (m === dxl) nx = b.minX; else if (m === dxr) nx = b.maxX;
+      else if (m === dzl) nz = b.minZ; else nz = b.maxZ;
+    }
+  }
+  _rc.x = nx; _rc.z = nz;
+  return _rc;
+}
+
+// nudge a spawn position out of every collider (NPCs, allies, monsters, nodes
+// can otherwise end up inside stalls, walls or randomly-placed boulders)
+export function findOpenSpot(x, z, pad = 0.4) {
+  for (let it = 0; it < 4; it++) {
+    let moved = false;
+    for (const c of circles) {
+      const r = c.r + pad;
+      let dx = x - c.x, dz = z - c.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= r * r) continue;
+      if (d2 < 0.0001) {
+        // dead center (e.g. vendor placed exactly on her stall) — step out toward town
+        const dd = Math.hypot(c.x, c.z) || 1;
+        dx = -c.x / dd; dz = -c.z / dd;
+        x = c.x + dx * r; z = c.z + dz * r;
+      } else {
+        const d = Math.sqrt(d2);
+        x = c.x + dx / d * r; z = c.z + dz / d * r;
+      }
+      moved = true;
+    }
+    for (const b of boxes) {
+      if (x > b.minX - pad && x < b.maxX + pad && z > b.minZ - pad && z < b.maxZ + pad) {
+        const dxl = x - (b.minX - pad), dxr = (b.maxX + pad) - x, dzl = z - (b.minZ - pad), dzr = (b.maxZ + pad) - z;
+        const m = Math.min(dxl, dxr, dzl, dzr);
+        if (m === dxl) x = b.minX - pad; else if (m === dxr) x = b.maxX + pad;
+        else if (m === dzl) z = b.minZ - pad; else z = b.maxZ + pad;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return { x, z };
+}
 
 let sun, hemi, ambient, skyMat, crystalMat, lampLights = [];
 let M = null;   // shared PBR materials, built once in initMaterials()
@@ -354,7 +422,7 @@ function buildVegetation(scene) {
     placeOnGround(tree, x, z);
     tree.rotation.y = rand(0, 6);
     group.add(tree);
-    treePositions.push({ x, z, r: 0.3 * s });
+    addCollider(x, z, 0.3 * s);
     placed++;
   }
 
@@ -366,6 +434,7 @@ function buildVegetation(scene) {
     placeOnGround(rock, x, z, -0.05);
     rock.rotation.y = rand(0, 6);
     group.add(rock);
+    addObjectCollider(rock);
   }
 
   // grass tufts: crossed alpha-tested blade quads
@@ -458,6 +527,7 @@ function buildVillage(scene) {
     placeOnGround(s, x, z);
     s.rotation.y = rot;
     g.add(s);
+    addCollider(x, z, 1.6);
   }
   function tent(x, z, rot, sc = 1) {
     const t = new THREE.Group();
@@ -470,6 +540,7 @@ function buildVillage(scene) {
     placeOnGround(t, x, z);
     t.rotation.y = rot;
     g.add(t);
+    addCollider(x, z, 1.5 * sc);
   }
   function banner(x, z) {
     const b = new THREE.Group();
@@ -481,6 +552,7 @@ function buildVillage(scene) {
     b.add(f);
     placeOnGround(b, x, z);
     g.add(b);
+    addCollider(x, z, 0.25);
   }
 
   stall(-10, 6, 1.2, awningRed);      // Mirelle's weapons
@@ -499,6 +571,8 @@ function buildVillage(scene) {
   shrine.add(votive);
   placeOnGround(shrine, -4, -13);
   g.add(shrine);
+  addCollider(-5.1, -13, 0.4);   // twin pillars only — the low dais stays walkable
+  addCollider(-2.9, -13, 0.4);
 
   // campfire ring (lit at night)
   const fire = new THREE.Group();
@@ -512,6 +586,7 @@ function buildVillage(scene) {
   lampLights.push({ light: fl, head: null });
   placeOnGround(fire, -9, 12);
   g.add(fire);
+  addCollider(-9, 12, 0.8);
 
   // stone wall + north gatehouse (San d'Oria-style masonry)
   function wallSeg(x, z, len, rot) {
@@ -521,6 +596,7 @@ function buildVillage(scene) {
     placeOnGround(w, x, z);
     w.rotation.y = rot;
     g.add(w);
+    if (rot === 0) addBox(x, z, len, 1.4); else addBox(x, z, 1.4, len);
   }
   wallSeg(-12.4, 24, 16.5, 0);
   wallSeg(12.4, 24, 16.5, 0);
@@ -534,6 +610,7 @@ function buildVillage(scene) {
     tw.add(cone);
     placeOnGround(tw, tx, 24);
     g.add(tw);
+    addCollider(tx, 24, 1.9);
   }
   const arch = new THREE.Group();
   arch.add(mesh(uvBox(9.4, 1.4, 1.5, 2.0), M.bricks, 0, 4.7, 0));
@@ -552,6 +629,7 @@ function buildVillage(scene) {
     placeOnGround(lamp, lx, lz);
     lampLights.push({ light, head });
     g.add(lamp);
+    addCollider(lx, lz, 0.25);
   }
 
   // market clutter
@@ -559,11 +637,13 @@ function buildVillage(scene) {
     const b = mesh(uvCyl(0.42, 0.46, 0.9, 10, 0.9), M.planks);
     placeOnGround(b, bx, bz, 0.45);
     g.add(b);
+    addCollider(bx, bz, 0.55);
   }
   const crate = mesh(uvBox(0.9, 0.9, 0.9, 0.9), M.planks);
   placeOnGround(crate, 13.2, 3.6, 0.45);
   crate.rotation.y = 0.4;
   g.add(crate);
+  addCollider(13.2, 3.6, 0.7);
 
   scene.add(g);
 }
@@ -583,11 +663,13 @@ function buildRuins(scene) {
     col.rotation.y = rand(0, 6);
     col.rotation.z = rand(-0.04, 0.04);
     g.add(col);
+    addCollider(x, z, 0.85);
   }
   // central altar + relic orb
   const altar = mesh(uvBox(3, 1, 3, 1.6), M.paving);
   placeOnGround(altar, -70, -68, 0.5);
   g.add(altar);
+  addCollider(-70, -68, 1.9);
   const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), new THREE.MeshStandardMaterial({ color: 0x9b6cd6, emissive: 0x6a30b0, emissiveIntensity: 0.8 }));
   orb.position.set(-70, altar.position.y + 1.2, -68);
   g.add(orb);
@@ -598,6 +680,7 @@ function buildRuins(scene) {
     placeOnGround(b, -70 + Math.cos(a) * r, -68 + Math.sin(a) * r, -0.05);
     b.rotation.y = rand(0, 6);
     g.add(b);
+    addObjectCollider(b);
   }
   // braziers by the altar (lit at night like the lamps)
   for (const dx of [-2.2, 2.2]) {
@@ -611,6 +694,7 @@ function buildRuins(scene) {
     placeOnGround(t, -70 + dx, -65.5);
     lampLights.push({ light, head });
     g.add(t);
+    addCollider(-70 + dx, -65.5, 0.2);
   }
   scene.add(g);
 }
@@ -640,6 +724,7 @@ function buildHomePoint(scene) {
   grp.add(glow);
   placeOnGround(grp, 3, -5);
   scene.add(grp);
+  addCollider(3, -5, 2.3);   // the spire cluster — the dais steps stay walkable
   // the small floating crystal in front is the interact/respawn point
   const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.55), crystalMat.clone());
   crystal.castShadow = true;
@@ -704,7 +789,7 @@ function buildBeach(scene) {
     palm.position.set(x, h, z);
     palm.rotation.y = rand(0, Math.PI * 2);
     scene.add(palm);
-    treePositions.push({ x, z, r: 0.4 * s });
+    addCollider(x, z, 0.4 * s);
     placed++;
   }
 }
