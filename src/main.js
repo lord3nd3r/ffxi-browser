@@ -163,6 +163,23 @@ function startGame(charData, saved) {
         }
       });
       Socket.on('player:count', ({ count }) => UI.updatePlayerCount(count));
+      Socket.on('log:message', ({ text, channel }) => UI.log(text, channel || 'sys'));
+      Socket.on('visual:tracker_update', () => UI.updateTracker());
+      // ── parties, trading, bazaars ──
+      Socket.on('party:invited', ({ from }) => {
+        UI.showPrompt(`<b>${from}</b> invites you to join their party.`, 'Accept', 'Decline',
+          () => Socket.emit('party:accept', {}), () => Socket.emit('party:decline', {}));
+      });
+      Socket.on('party:state', (d) => UI.setRemoteParty(d));
+      Socket.on('trade:requested', ({ from }) => {
+        UI.showPrompt(`<b>${from}</b> proposes a trade.`, 'Accept', 'Decline',
+          () => Socket.emit('trade:accept', {}), () => Socket.emit('trade:decline', {}));
+      });
+      Socket.on('trade:state', (st) => UI.openTradeWindow(st));
+      Socket.on('trade:complete', () => UI.closeTradeWindow());
+      Socket.on('trade:cancelled', () => UI.closeTradeWindow());
+      Socket.on('bazaar:list', (d) => UI.openBazaarWindow(d));
+      Socket.on('bazaar:mine', ({ bazaar }) => { S.myBazaar = bazaar || {}; });
       Socket.on('friends:update', () => {
         UI.refreshFriendsListIfOpen();
       });

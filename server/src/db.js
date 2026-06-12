@@ -47,3 +47,6 @@ db.exec(`
     UNIQUE(account_id, friend_id)
   );
 `);
+
+// migrations for columns added after launch
+try { db.exec(`ALTER TABLE characters ADD COLUMN bazaar_json TEXT NOT NULL DEFAULT '{}'`); } catch (e) { /* column exists */ }

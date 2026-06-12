@@ -127,6 +127,11 @@
     #castbar { position: absolute; left: 50%; bottom: 130px; transform: translateX(-50%); width: 260px; padding: 5px 8px; display: none; }
     #castbar .nm { font-size: 11px; text-align: center; margin-bottom: 3px; color: #99e9f2; }
 
+    /* ---------- social prompts & party frames ---------- */
+    .social-prompt { position: fixed; left: 50%; top: 90px; transform: translateX(-50%); z-index: 200; padding: 12px 16px; text-align: center; min-width: 240px; }
+    .social-prompt .row { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+    #party-remote .party-head { color: #ffe066; font-size: 11px; text-align: right; margin: 4px 0 2px; }
+
     /* ---------- floating combat text ---------- */
     .floater { position: absolute; pointer-events: none; font-weight: bold; font-size: 16px; text-shadow: 0 1px 3px #000, 0 0 6px rgba(0,0,0,.8); z-index: 50; transform: translate(-50%, -50%); white-space: nowrap; }
     .floater.dmg  { color: #fff; }

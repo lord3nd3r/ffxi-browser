@@ -5,6 +5,8 @@ import { S, clamp, lerp } from './state.js';
 import { G, setTarget, tabTarget, requestInteract, useHotbarSlot } from './game.js';
 import { getShake } from './effects.js';
 import * as UI from './ui.js';
+import * as Socket from './socket.js';
+import * as Puppets from './puppets.js';
 
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -17,6 +19,7 @@ function pickables() {
   for (const m of S.monsters) if (m.alive && m.mesh.visible) list.push({ root: m.mesh, ent: m });
   for (const n of S.npcs) list.push({ root: n.mesh, ent: n });
   for (const c of S.party) if (c !== S.player) list.push({ root: c.mesh, ent: c });
+  for (const pe of Puppets.list()) list.push({ root: pe.mesh, ent: pe });   // remote players
   for (const nd of S.nodes) list.push({ root: nd.mesh, ent: { ...nd, isNode: true, mesh: nd.mesh, ref: nd } });
   if (S.crystal) list.push({ root: S.crystal, ent: { isCrystal: true, mesh: S.crystal, name: 'Home Point Crystal' } });
   return list;
@@ -69,6 +72,11 @@ function openContext(e, x, y) {
     items.push({ label: 'Examine Crystal', fn: () => requestInteract(e) });
   } else if (e.kind === 'companion') {
     items.push({ label: 'Check', fn: () => UI.log(`${e.name}: Lv.${e.level} — a trusty companion.`, 'sys') });
+  } else if (e.kind === 'player' && e.sid && Socket.isConnected()) {
+    items.push({ label: 'Invite to Party', fn: () => Socket.emit('party:invite', { targetName: e.name }) });
+    items.push({ label: 'Trade', fn: () => Socket.emit('trade:request', { targetName: e.name }) });
+    items.push({ label: 'Browse Bazaar', fn: () => Socket.emit('bazaar:browse', { sellerId: e.sid }) });
+    items.push({ label: 'Check', fn: () => UI.log(`${e.name}: Lv.${e.level} ${e.job} — an adventurer like yourself.`, 'sys') });
   }
   items.push({ label: 'Cancel', fn: () => {} });
   UI.showCtxMenu(x, y, items);
@@ -110,7 +118,7 @@ export function initControls(dom) {
     if (btn === 0) {
       if (hit.ent) {
         const ent = hit.ent;
-        if (ent.kind) setTarget(ent.kind === 'monster' || ent.kind === 'npc' || ent.kind === 'companion' ? ent : null);
+        if (ent.kind) setTarget(ent.kind === 'monster' || ent.kind === 'npc' || ent.kind === 'companion' || (ent.kind === 'player' && ent.sid) ? ent : null);
         // double click: interact / attack-move
         const now = performance.now();
         if (lastClickEnt === (ent.ref || ent.id || ent) || (ent.id && lastClickEnt === ent.id)) {
@@ -133,7 +141,7 @@ export function initControls(dom) {
       }
     } else if (btn === 2 && hit.ent) {
       const ent = hit.ent;
-      if (ent.kind === 'monster' || ent.kind === 'npc' || ent.kind === 'companion') setTarget(ent);
+      if (ent.kind === 'monster' || ent.kind === 'npc' || ent.kind === 'companion' || (ent.kind === 'player' && ent.sid)) setTarget(ent);
       openContext(ent, e.clientX, e.clientY);
     }
   });

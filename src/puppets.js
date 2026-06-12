@@ -49,17 +49,21 @@ export function applySnapshot(snapshot) {
         appearance: p.appearance,
       });
 
-      const plate = makeNameplate(p.charName, '#e8edf8');
+      const plate = makeNameplate(p.bazaar ? `🛒 ${p.charName}` : p.charName, '#e8edf8');
       plate.position.y = 2.05;
       group.add(plate);
 
       e.mesh = group;
+      e.plate = plate;
       e.parts = parts;
       e.mixer = mixer;
       e.anims = anims;
       e.curAction = null;
       e.curLoop = null;
       e.oneShotAction = null;
+      e.sid = p.id;
+      e.job = p.job;
+      e.level = p.level || 1;
 
       group.position.set(p.x, S.heightAt(p.x, p.z), p.z);
       group.rotation.y = p.heading;
@@ -76,6 +80,7 @@ export function applySnapshot(snapshot) {
         lastSeen: Date.now(),
         job: p.job,
         appearance: p.appearance,
+        bazaar: !!p.bazaar,
       });
     } else {
       // Rebuild if job or appearance changed
@@ -86,7 +91,7 @@ export function applySnapshot(snapshot) {
           appearance: p.appearance,
         });
 
-        const plate = makeNameplate(p.charName, '#e8edf8');
+        const plate = makeNameplate(p.bazaar ? `🛒 ${p.charName}` : p.charName, '#e8edf8');
         plate.position.y = 2.05;
         group.add(plate);
 
@@ -95,6 +100,7 @@ export function applySnapshot(snapshot) {
         group.rotation.copy(existing.entity.mesh.rotation);
         S.scene.add(group);
 
+        existing.entity.plate = plate;
         existing.entity.mesh = group;
         existing.entity.parts = parts;
         existing.entity.mixer = mixer;
@@ -105,6 +111,18 @@ export function applySnapshot(snapshot) {
         existing.job = p.job;
         existing.appearance = p.appearance;
       }
+
+      // Swap the nameplate when the bazaar flag flips
+      if (existing.bazaar !== !!p.bazaar) {
+        existing.bazaar = !!p.bazaar;
+        const e = existing.entity;
+        if (e.plate) e.mesh.remove(e.plate);
+        e.plate = makeNameplate(existing.bazaar ? `🛒 ${p.charName}` : p.charName, '#e8edf8');
+        e.plate.position.y = 2.05;
+        e.mesh.add(e.plate);
+      }
+      existing.entity.job = p.job;
+      existing.entity.level = p.level || existing.entity.level;
 
       // Update target positions for interpolation
       existing.targetX = p.x;
@@ -203,4 +221,9 @@ export function clearPuppets() {
 
 export function getPuppet(id) {
   return puppets.get(id)?.entity;
+}
+
+/** All remote-player entities (for picking / context menus). */
+export function list() {
+  return [...puppets.values()].map(p => p.entity);
 }

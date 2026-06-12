@@ -2,6 +2,7 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
 import { JOBS, ACTIONS, ITEMS, MONSTERS, SPAWNS, QUESTS, STARTER_WEAPON, expToNext, MAX_LEVEL } from './data.js';
+import * as Social from './social.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -225,18 +226,19 @@ function savePlayerToDb(p) {
     INSERT INTO characters (
       account_id, name, current_job, gil, jobs_json, inventory_json,
       equipment_json, quests_json, appearance_json, recruited_json,
-      auto_magic_json, boss_down, hp, mp, pos_x, pos_z, updated_at
+      auto_magic_json, bazaar_json, boss_down, hp, mp, pos_x, pos_z, updated_at
     ) VALUES (
       @account_id, @name, @current_job, @gil, @jobs_json, @inventory_json,
       @equipment_json, @quests_json, @appearance_json, @recruited_json,
-      @auto_magic_json, @boss_down, @hp, @mp, @pos_x, @pos_z, datetime('now')
+      @auto_magic_json, @bazaar_json, @boss_down, @hp, @mp, @pos_x, @pos_z, datetime('now')
     )
     ON CONFLICT(account_id) DO UPDATE SET
       name = excluded.name, current_job = excluded.current_job, gil = excluded.gil,
       jobs_json = excluded.jobs_json, inventory_json = excluded.inventory_json,
       equipment_json = excluded.equipment_json, quests_json = excluded.quests_json,
       appearance_json = excluded.appearance_json, recruited_json = excluded.recruited_json,
-      auto_magic_json = excluded.auto_magic_json, boss_down = excluded.boss_down,
+      auto_magic_json = excluded.auto_magic_json, bazaar_json = excluded.bazaar_json,
+      boss_down = excluded.boss_down,
       hp = excluded.hp, mp = excluded.mp, pos_x = excluded.pos_x, pos_z = excluded.pos_z,
       updated_at = datetime('now')
   `).run({
@@ -251,6 +253,7 @@ function savePlayerToDb(p) {
     appearance_json: JSON.stringify(p.appearance),
     recruited_json: JSON.stringify(p.recruited),
     auto_magic_json: JSON.stringify(p.autoMagic || {}),
+    bazaar_json: JSON.stringify(p.bazaar || {}),
     boss_down: p.bossDown ? 1 : 0,
     hp: p.hp,
     mp: p.mp,
@@ -266,7 +269,7 @@ function gainExp(p, amount, socket, io) {
   if (!jobState) return;
 
   jobState.exp += amount;
-  socket.emit('log:message', { text: `You gain ${amount} experience points.`, channel: 'gain' });
+  socket?.emit('log:message', { text: `You gain ${amount} experience points.`, channel: 'gain' });
 
   while (jobState.exp >= expToNext(jobState.level) && jobState.level < MAX_LEVEL) {
     jobState.exp -= expToNext(jobState.level);
@@ -283,7 +286,7 @@ function gainExp(p, amount, socket, io) {
     }
 
     io.emit('visual:burst', { x: p.x, z: p.z, color: 0x57a8ff, count: 24, size: 2 });
-    socket.emit('log:message', { text: `${p.charName} reaches level ${p.level}!`, channel: 'sys' });
+    socket?.emit('log:message', { text: `${p.charName} reaches level ${p.level}!`, channel: 'sys' });
   }
 }
 
@@ -347,10 +350,42 @@ function applyDamageToMonster(m, amount, actorSid, crit, magic, io) {
 }
 
 function gainKillRewards(p, m, socket, io) {
-  const diff = m.level - p.level;
-  let exp = Math.round(m.def.exp * clamp(1 + diff * 0.22, 0.1, 2.2));
-  if (m.def.boss) exp = m.def.exp;
-  gainExp(p, exp, socket, io);
+  // EXP, quest progress and the boss flag are shared with party members near
+  // the kill; gil and item drops go to the killer alone.
+  const nearSids = Social.getPartySids(socket.id).filter(sid => {
+    const mp = players.get(sid);
+    return mp && mp.hp > 0 && Math.hypot(mp.x - m.x, mp.z - m.z) < 50;
+  });
+  if (!nearSids.includes(socket.id)) nearSids.push(socket.id);
+  const share = (1 + 0.1 * (nearSids.length - 1)) / nearSids.length;   // small bonus for grouping
+
+  for (const sid of nearSids) {
+    const mp = players.get(sid);
+    const msock = io.sockets.sockets.get(sid);
+    const diff = m.level - mp.level;
+    let exp = Math.round(m.def.exp * clamp(1 + diff * 0.22, 0.1, 2.2) * share);
+    if (m.def.boss) exp = Math.round(m.def.exp * share);
+    gainExp(mp, exp, msock, io);
+
+    for (const [qid, q] of Object.entries(QUESTS)) {
+      const st = mp.quests[qid];
+      if (st && st.state === 'active' && q.type === 'kill' && q.target === m.typeId && st.n < q.count) {
+        st.n++;
+        msock?.emit('log:message', { text: `${q.name}: ${st.n}/${q.count} slain.`, channel: 'npc' });
+        msock?.emit('visual:tracker_update', {});
+      }
+    }
+
+    if (m.def.boss) {
+      mp.bossDown = true;
+      msock?.emit('log:message', { text: 'The earth itself seems to sigh in relief. Gorthak the Render is no more!', channel: 'sys' });
+    }
+
+    if (sid !== socket.id) {
+      savePlayerToDb(mp);
+      sendPlayerStatus(msock, mp);
+    }
+  }
 
   const gil = irand(m.def.gil[0], m.def.gil[1]);
   p.gil += gil;
@@ -362,21 +397,6 @@ function gainKillRewards(p, m, socket, io) {
       socket.emit('log:message', { text: `You find ${aAn(ITEMS[d.id].name)} on the ${m.def.name}.`, channel: 'loot' });
       socket.emit('log:message', { text: `${p.charName} obtains ${aAn(ITEMS[d.id].name)}.`, channel: 'loot' });
     }
-  }
-
-  // quest progress
-  for (const [qid, q] of Object.entries(QUESTS)) {
-    const st = p.quests[qid];
-    if (st && st.state === 'active' && q.type === 'kill' && q.target === m.typeId && st.n < q.count) {
-      st.n++;
-      socket.emit('log:message', { text: `${q.name}: ${st.n}/${q.count} slain.`, channel: 'npc' });
-      socket.emit('visual:tracker_update', {});
-    }
-  }
-
-  if (m.def.boss) {
-    p.bossDown = true;
-    io.to(socket.id).emit('log:message', { text: 'The earth itself seems to sigh in relief. Gorthak the Render is no more!', channel: 'sys' });
   }
 
   savePlayerToDb(p);
@@ -544,6 +564,7 @@ function resolveAction(p, actionId, targetId, socket, io) {
  */
 export function initChat(io) {
   ioInstance = io;
+  Social.init({ players, addItem, removeItem, countItem, savePlayerToDb, sendPlayerStatus });
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Missing auth token'));
@@ -561,6 +582,7 @@ export function initChat(io) {
     console.log(`[ws] connected: ${socket.username} (${socket.id})`);
     trackedPlayers.set(socket.id, new Set());
     trackedMonsters.set(socket.id, new Set());
+    Social.register(io, socket);
 
     // ── player:enter — client reports character name & details ───
     socket.on('player:enter', ({ charName, job, appearance, x, z, heading, moving }) => {
@@ -599,6 +621,7 @@ export function initChat(io) {
         appearance: JSON.parse(charRow.appearance_json),
         recruited: JSON.parse(charRow.recruited_json),
         autoMagic: JSON.parse(charRow.auto_magic_json),
+        bazaar: JSON.parse(charRow.bazaar_json || '{}'),
         bossDown: !!charRow.boss_down,
         hp: charRow.hp !== null ? charRow.hp : 38,
         mp: charRow.mp !== null ? charRow.mp : 0,
@@ -977,12 +1000,13 @@ export function initChat(io) {
     socket.on('chat:party', ({ text }) => {
       const sender = players.get(socket.id);
       if (!sender || typeof text !== 'string' || !text.trim()) return;
-      socket.emit('chat:message', {
+      const msg = {
         from: sender.charName,
         text: text.trim().slice(0, 200),
         channel: 'party',
         timestamp: Date.now(),
-      });
+      };
+      for (const sid of Social.getPartySids(socket.id)) io.to(sid).emit('chat:message', msg);
     });
 
     socket.on('chat:tell', ({ targetName, text }) => {
@@ -1027,6 +1051,7 @@ export function initChat(io) {
 
     // ── disconnect ───────────────────────────────────────────────────
     socket.on('disconnect', (reason) => {
+      Social.onDisconnect(io, socket);
       const entry = players.get(socket.id);
       if (entry) {
         savePlayerToDb(entry);
@@ -1042,7 +1067,11 @@ export function initChat(io) {
   });
 
   // ── Authoritative 10Hz World Loop (AI & tick) ──────────────────
+  let tickN = 0;
   setInterval(() => {
+    // 0. Party vitals refresh (1 Hz is plenty for HP/MP bars)
+    if (++tickN % 10 === 0) Social.tickParties(io);
+
     // 1. Update Gathering Nodes
     for (const [id, n] of nodes) {
       if (!n.available) {
@@ -1445,11 +1474,13 @@ export function initChat(io) {
             id: sid2,
             charName: p2.charName,
             job: p2.job,
+            level: p2.level,
             appearance: p2.appearance,
             x: p2.x,
             z: p2.z,
             heading: p2.heading,
             moving: p2.moving,
+            bazaar: Social.hasBazaar(p2),
           });
         }
       }

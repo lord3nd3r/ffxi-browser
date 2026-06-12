@@ -47,6 +47,15 @@ function handleLocalCommand(cmd) {
     openFriendsList();
     return true;
   }
+  // social commands (need the multiplayer server)
+  if (main === '/invite' || main === '/trade' || main === '/leave') {
+    if (!Socket.isConnected()) { log('You are not connected to a server.', 'sys'); return true; }
+    if (main === '/leave') Socket.emit('party:leave', {});
+    else if (!parts[1]) log(`Usage: ${main} <player name>`, 'sys');
+    else if (main === '/invite') Socket.emit('party:invite', { targetName: parts[1] });
+    else Socket.emit('trade:request', { targetName: parts[1] });
+    return true;
+  }
   return false; // not a local command
 }
 
@@ -99,7 +108,7 @@ export function submitChat() {
         }
       }
     } else if (text.startsWith('/')) {
-      log(`Unknown command. Try /say, /shout, /party, or /sit.`, 'sys');
+      log(`Unknown command. Try /say, /shout, /party, /tell, /invite, /trade, /leave, or /sit.`, 'sys');
     }
   }
   closeChat();
@@ -156,6 +165,120 @@ export function initPartyFrames() {
     wrap.appendChild(d);
     return { root: d, lv: d.querySelector('.lv'), hp: d.querySelector('.hp .fill'), hpt: d.querySelector('.hp .txt'), mp: d.querySelector('.mp .fill'), mpt: d.querySelector('.mp .txt'), hpbar: d.querySelector('.hp') };
   });
+  renderRemoteParty();   // re-attach human party frames after the rebuild
+}
+
+// =====================================================================
+// social: prompts, real player parties, trading, bazaars
+// =====================================================================
+let promptEl = null;
+export function hidePrompt() { if (promptEl) { promptEl.remove(); promptEl = null; } }
+export function showPrompt(html, yesLabel, noLabel, onYes, onNo) {
+  hidePrompt();
+  promptEl = document.createElement('div');
+  promptEl.className = 'panel social-prompt';
+  promptEl.innerHTML = `<div>${html}</div><div class="row"></div>`;
+  const row = promptEl.querySelector('.row');
+  const mk = (label, fn, gold) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (gold ? ' gold' : '');
+    b.textContent = label;
+    b.onclick = () => { hidePrompt(); fn && fn(); };
+    row.appendChild(b);
+  };
+  mk(yesLabel, onYes, true);
+  mk(noLabel, onNo);
+  document.body.appendChild(promptEl);
+  const el = promptEl;
+  setTimeout(() => { if (promptEl === el) { hidePrompt(); onNo && onNo(); } }, 30000);
+}
+
+let remoteParty = { leader: null, members: [] };
+export function setRemoteParty(d) {
+  remoteParty = d || { leader: null, members: [] };
+  renderRemoteParty();
+}
+function renderRemoteParty() {
+  const party = $('party');
+  if (!party) return;
+  let wrap = $('party-remote');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id = 'party-remote'; }
+  party.appendChild(wrap);   // re-attach if initPartyFrames wiped the container
+  const myId = Socket.getId();
+  const others = (remoteParty.members || []).filter(m => m.id !== myId);
+  if (!others.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div class="party-head">— Party —</div>';
+  for (const m of others) {
+    const d = document.createElement('div');
+    d.className = 'pmember panel';
+    const hpf = (m.hp / (m.maxhp || 1)).toFixed(3);
+    const mpf = (m.maxmp ? m.mp / m.maxmp : 0).toFixed(3);
+    d.innerHTML = `<div class="name"><span>${remoteParty.leader === m.id ? '👑 ' : ''}${m.name}</span><span class="lv">Lv.${m.level} ${m.job}</span></div>
+      <div class="bar hp"><div class="fill" style="transform:scaleX(${hpf})"></div><div class="txt">${m.hp}/${m.maxhp}</div></div>
+      <div class="bar mp"><div class="fill" style="transform:scaleX(${mpf})"></div><div class="txt">${m.maxmp ? `${m.mp}/${m.maxmp}` : '—'}</div></div>`;
+    wrap.appendChild(d);
+  }
+}
+
+let tradeOpen = false;
+let tradeOffer = { items: [], gil: 0 };
+function sendOffer() { Socket.emit('trade:offer', tradeOffer); }
+export function openTradeWindow(st) {
+  tradeOpen = true;
+  // mirror the server's view of my offer so rebuilds stay in sync
+  tradeOffer = { items: st.mine.items.map(i => ({ ...i })), gil: st.mine.gil };
+  const itemRow = (it) => `<div class="listrow"><span>${ITEMS[it.id].icon} ${ITEMS[it.id].name} ×${it.qty}</span></div>`;
+  let body = `<div style="display:flex;gap:10px">
+    <div style="flex:1"><b>You offer</b> ${st.mine.confirmed ? '✅' : ''}${st.mine.items.map(itemRow).join('') || '<div class="sub">no items</div>'}<div class="sub">${st.mine.gil} gil</div></div>
+    <div style="flex:1"><b>${st.partner} offers</b> ${st.theirs.confirmed ? '✅' : ''}${st.theirs.items.map(itemRow).join('') || '<div class="sub">no items</div>'}<div class="sub">${st.theirs.gil} gil</div></div>
+  </div>
+  <div style="margin-top:8px"><b>Your bags</b> — click + to offer:</div>`;
+  for (const row of S.inventory) {
+    const it = ITEMS[row.id];
+    if (it.type === 'key') continue;
+    const offered = tradeOffer.items.find(r => r.id === row.id);
+    body += `<div class="listrow"><span>${it.icon} ${it.name} ×${row.qty}${offered ? ` <b>(offering ${offered.qty})</b>` : ''}</span>
+      <span><button class="btn" data-tadd="${row.id}">+</button>${offered ? ` <button class="btn" data-trem="${row.id}">−</button>` : ''}</span></div>`;
+  }
+  body += `<div style="margin-top:6px">Gil: <input id="trade-gil" type="number" min="0" value="${tradeOffer.gil}" style="width:90px"/> <button class="btn" data-tgil="1">Set</button></div>
+  <p class="sub">Any change resets both confirmations. The trade completes when both sides confirm.</p>`;
+  showDialog(`Trade with ${st.partner}`, body, [
+    { label: st.mine.confirmed ? 'Confirmed ✓' : 'Confirm Trade', gold: true, keep: true, fn: () => Socket.emit('trade:confirm', {}) },
+    { label: 'Cancel Trade', keep: true, fn: () => Socket.emit('trade:cancel', {}) },
+  ]);
+  $('dlg-body').onclick = (e) => {
+    const get = (k) => e.target.getAttribute && e.target.getAttribute(k);
+    const add = get('data-tadd'), rem = get('data-trem');
+    if (add) {
+      const r = tradeOffer.items.find(x => x.id === add);
+      if (r) r.qty = Math.min(countItem(add), r.qty + 1);
+      else tradeOffer.items.push({ id: add, qty: 1 });
+      sendOffer();
+    } else if (rem) {
+      const r = tradeOffer.items.find(x => x.id === rem);
+      if (r && --r.qty <= 0) tradeOffer.items = tradeOffer.items.filter(x => x !== r);
+      sendOffer();
+    } else if (get('data-tgil')) {
+      tradeOffer.gil = Math.max(0, Math.floor(Number($('trade-gil').value) || 0));
+      sendOffer();
+    }
+  };
+}
+export function closeTradeWindow() { if (tradeOpen) { tradeOpen = false; closeDialog(); } }
+
+export function openBazaarWindow({ sellerId, seller, items }) {
+  let body = '';
+  if (!items.length) body = '<p style="color:#8a96b8">Nothing for sale right now.</p>';
+  for (const it of items) {
+    const d = ITEMS[it.id];
+    body += `<div class="listrow"><span>${d.icon} ${d.name} ×${it.qty}<br/><span class="sub">${it.price} gil each</span></span>
+      <span><button class="btn" data-bzbuy="${it.id}">Buy 1</button></span></div>`;
+  }
+  showDialog(`${seller}'s Bazaar — you have ${S.gil} G`, body, [{ label: 'Close' }]);
+  $('dlg-body').onclick = (e) => {
+    const b = e.target.getAttribute && e.target.getAttribute('data-bzbuy');
+    if (b) Socket.emit('bazaar:buy', { sellerId, itemId: b, qty: 1 });
+  };
 }
 
 export function updateHUD() {
@@ -470,6 +593,10 @@ export function openInventory() {
     if (it.type === 'consumable') btn = `<button class="btn" data-use="${row.id}">Use</button>`;
     else if (it.type === 'weapon' && it.job === S.job && eq.weapon !== row.id) btn = `<button class="btn" data-eq="${row.id}">Equip</button>`;
     else if (it.type === 'armor' && eq.armor !== row.id) btn = `<button class="btn" data-eq="${row.id}">Equip</button>`;
+    if (Socket.isConnected() && it.type !== 'key') {
+      const bz = S.myBazaar && S.myBazaar[row.id];
+      btn += ` <button class="btn" data-baz="${row.id}">${bz ? `🛒 ${bz}g` : 'Bazaar'}</button>`;
+    }
     const sub = it.type === 'weapon' ? `${JOBS[it.job].abbr} weapon · DMG ${it.dmg}` : it.type === 'armor' ? `DEF ${it.def}` : it.type === 'material' ? 'material' : it.type === 'key' ? 'key item' : (it.heal ? `+${it.heal} HP` : `+${it.mpheal} MP`);
     body += `<div class="listrow"><span>${it.icon} ${it.name} ×${row.qty}<br/><span class="sub">${sub}</span></span><span>${btn}</span></div>`;
   }
@@ -478,8 +605,20 @@ export function openInventory() {
   $('dlg-body').addEventListener('click', (e) => {
     const use = e.target.getAttribute && e.target.getAttribute('data-use');
     const eqi = e.target.getAttribute && e.target.getAttribute('data-eq');
+    const baz = e.target.getAttribute && e.target.getAttribute('data-baz');
     if (use) { useConsumable(use); closeDialog(); openInventory(); }
     if (eqi) { equipItem(eqi); closeDialog(); openInventory(); }
+    if (baz) {
+      const cur = (S.myBazaar && S.myBazaar[baz]) || '';
+      const v = window.prompt(`Bazaar price per unit for ${ITEMS[baz].name} (0 to remove):`, cur);
+      if (v !== null) {
+        const pr = Math.max(0, Math.floor(Number(v) || 0));
+        Socket.emit('bazaar:set', { itemId: baz, price: pr });
+        S.myBazaar = S.myBazaar || {};
+        if (pr > 0) S.myBazaar[baz] = pr; else delete S.myBazaar[baz];
+      }
+      closeDialog(); openInventory();
+    }
   }, { once: true });
 }
 

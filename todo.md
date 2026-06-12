@@ -102,3 +102,24 @@ This checklist outlines the progressive phases required to convert the single-pl
   - `tintFlash()`: brief emissive flash on the model when hit — red for physical, lavender for magic, gold for crits. Materials are lazily cloned per entity (SkeletonUtils clones share materials, so without this every twin monster would flash). Replaces the old dead `hitFlash` code.
 - [x] **Buff/debuff indicators**
   - Persistent particle auras: every 0.3s each active effect emits colored motes — rising for buffs (Berserk red, Boost orange, Protect cyan, Dodge teal, Defender blue, Flee white), low mist for Sneak Attack & sleeping monsters, falling drips for debuffs (Armor Break gold, Slow frost-blue, Dia DoT golden).
+
+---
+
+## 🤝 Phase 6: Player Parties, Trading & Bazaars ✅ DONE
+*Goal: Turn parallel play into playing together — humans grouping, sharing EXP, and exchanging items.*
+
+- [x] **Real player parties**
+  - New `server/src/social.js`: party registry (max 6), `party:invite/accept/decline/leave`, leader passing, disband-when-one-remains, disconnect handling.
+  - EXP, kill-quest progress and the boss flag are shared with party members within 50 units of a kill, with a +10%-per-extra-member grouping bonus before the split. Gil and item drops stay with the killer.
+  - `/p` chat now actually relays to party members. Party vitals (HP/MP/level) are pushed at 1 Hz; the client renders human members as extra party frames (👑 marks the leader).
+  - Commands: `/invite <name>`, `/leave`; or right-click another player → Invite to Party. Invites show an Accept/Decline prompt.
+- [x] **Player-to-player trading**
+  - Trade sessions with offer (items + gil) and double-confirm; any change to either offer resets both confirmations; the swap is validated and executed atomically server-side, then both characters are saved.
+  - Client trade window shows both offers live, lets you add/remove items from your bags and set gil. `/trade <name>` or right-click → Trade (must be within 10 units).
+- [x] **Personal bazaars**
+  - Price any inventory item from the Inventory window ("Bazaar" button); prices persist in a new `bazaar_json` column. Players with an active bazaar get a 🛒 nameplate marker (flag travels in the player snapshot).
+  - Right-click a player → Browse Bazaar to see priced items and buy; gil/items transfer server-side with both parties notified and saved (12-unit range).
+- [x] **Side fixes**
+  - Remote players are now click/right-click targetable (they were unpickable before).
+  - The client now listens to `log:message` and `visual:tracker_update` — server combat/loot/quest text was previously dropped entirely.
+  - Verified end-to-end with a two-client socket test (18 assertions: invite→accept→state, /p relay, trade confirm + gil movement, bazaar set/browse/buy, leave→disband).
