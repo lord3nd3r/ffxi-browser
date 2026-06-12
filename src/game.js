@@ -7,6 +7,8 @@ import { Entity, makeNameplate, spawnMonster, makeCharacterModel, setLoopAnim, p
 import * as UI from './ui.js';
 import { treeAt, env } from './world.js';
 import * as API from './api.js';
+import * as Socket from './socket.js';
+import * as Puppets from './puppets.js';
 
 export const G = { now: 0, particles: [], targetRing: null, pendingInteract: null, combatTimer: 0, saveTimer: 0 };
 
@@ -73,7 +75,7 @@ function applyJobStats(e, job, level, fullHeal = true) {
 }
 
 // job -> KayKit model (each ships with its own textured gear and weapons)
-const JOB_MODEL = { WAR: 'Knight', MNK: 'Barbarian', WHM: 'Mage', BLM: 'Rogue_Hooded', THF: 'Rogue' };
+export const JOB_MODEL = { WAR: 'Knight', MNK: 'Barbarian', WHM: 'Mage', BLM: 'Rogue_Hooded', THF: 'Rogue' };
 // job -> attack animations
 const JOB_ATTACK = {
   WAR: ['1H_Melee_Attack_Slice_Diagonal', '1H_Melee_Attack_Chop'],
@@ -176,10 +178,12 @@ export function initGame(charData) {
   });
 
   // monsters
-  for (const sp of SPAWNS) {
-    for (let i = 0; i < sp.count; i++) {
-      const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * sp.area.r;
-      spawnMonster(sp.monster, sp.area.x + Math.cos(a) * r, sp.area.z + Math.sin(a) * r);
+  if (!(API.isEnabled() && API.getToken())) {
+    for (const sp of SPAWNS) {
+      for (let i = 0; i < sp.count; i++) {
+        const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * sp.area.r;
+        spawnMonster(sp.monster, sp.area.x + Math.cos(a) * r, sp.area.z + Math.sin(a) * r);
+      }
     }
   }
 
@@ -226,11 +230,12 @@ export function initGame(charData) {
 }
 
 function buildNodes() {
+  let logIdx = 1, minIdx = 1, herbIdx = 1;
   const mk = (type, x, z) => {
     let mesh;
     if (type === 'logging') {
       mesh = new THREE.Group();
-      mesh.add(env(Math.random() < 0.5 ? 'stump_A' : 'stump_B', 4));
+      mesh.add(env('stump_A', 4)); // simplified fallback check
     } else if (type === 'mining') {
       mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshStandardMaterial({ color: 0xb87333, flatShading: true, metalness: 0.5, roughness: 0.5 }));
       mesh.position.y = 0.4; mesh.castShadow = true;
@@ -246,7 +251,8 @@ function buildNodes() {
     mesh.add(sparkle);
     mesh.position.set(x, S.heightAt(x, z), z);
     S.scene.add(mesh);
-    S.nodes.push({ type, x, z, mesh, sparkle, available: true, respawnT: 0 });
+    const id = type === 'logging' ? `log_${logIdx++}` : type === 'mining' ? `min_${minIdx++}` : `herb_${herbIdx++}`;
+    S.nodes.push({ id, type, x, z, mesh, sparkle, available: true, respawnT: 0 });
   };
   mk('logging', 42, 38); mk('logging', 60, 55); mk('logging', 50, 62); mk('logging', 68, 40);
   mk('mining', -48, -30); mk('mining', -58, -48); mk('mining', -42, -52);
@@ -446,6 +452,11 @@ export function tryAction(actor, actionId, opts = {}) {
   if (a.kind === 'ws' && p.tp < 100) { if (loud) UI.log(`Not enough TP. (${Math.floor(p.tp)}/100)`, 'sys'); return false; }
   if (a.range && target !== p && p.distTo(target) > a.range) { if (loud) UI.log('Target is out of range.', 'sys'); return false; }
 
+  if (Socket.isConnected()) {
+    Socket.emit('combat:use_action', { actionId, targetId: target ? target.id : null });
+    return true;
+  }
+
   if (a.kind === 'spell') {
     p.casting = { action: actionId, t: 0, total: a.cast, target };
     p.dest = null; S.autoRun = false;
@@ -462,6 +473,10 @@ function useItemAction(a, opts = {}) {
   if (countItem(a.item) <= 0) { if (!opts.silent) UI.log(`You have no ${ITEMS[a.item].name}s left.`, 'sys'); return false; }
   const readyAt = p.recasts['item'] || 0;
   if (G.now < readyAt) { if (!opts.silent) UI.log('You must wait before using another item.', 'sys'); return false; }
+  if (Socket.isConnected()) {
+    Socket.emit('combat:use_action', { actionId: a.item === 'potion' ? 'use_potion' : 'use_ether' });
+    return true;
+  }
   useConsumable(a.item);
   p.recasts['item'] = G.now + 5;
   UI.refreshHotbar();
@@ -628,6 +643,10 @@ function doInteract(thing) {
 
 function startGather(node) {
   if (!node.available) { UI.log('There is nothing left to gather here.', 'sys'); return; }
+  if (Socket.isConnected()) {
+    Socket.emit('gather:interact', { nodeId: node.id });
+    return;
+  }
   const p = S.player;
   const label = node.type === 'logging' ? 'Logging…' : node.type === 'mining' ? 'Mining…' : 'Harvesting…';
   p.casting = { gather: node, t: 0, total: 2.2 };
@@ -650,6 +669,10 @@ function finishGather(node) {
 
 export function changeJob(job) {
   if (S.player.engaged || S.player.casting) { UI.log('You cannot change jobs while busy.', 'sys'); return; }
+  if (Socket.isConnected()) {
+    Socket.emit('job:change', { job });
+    return;
+  }
   S.job = job;
   const lvl = S.jobs[job].level;
   const p = S.player;
@@ -668,6 +691,10 @@ export function changeJob(job) {
 export function craftRecipe(rid) {
   const r = RECIPES.find(x => x.id === rid);
   for (const m of r.mats) if (countItem(m.id) < m.qty) { UI.log('You lack the materials.', 'sys'); return; }
+  if (Socket.isConnected()) {
+    Socket.emit('craft:recipe', { rid });
+    return;
+  }
   for (const m of r.mats) removeItem(m.id, m.qty);
   addItem(r.result, r.qty);
   UI.log(`You synthesize ${r.qty > 1 ? r.qty + ' ' : ''}${ITEMS[r.result].name}${r.qty > 1 ? 's' : ''}!`, 'gain');
@@ -676,6 +703,10 @@ export function craftRecipe(rid) {
 }
 
 export function buyItem(id) {
+  if (Socket.isConnected()) {
+    Socket.emit('shop:buy', { id });
+    return true;
+  }
   const it = ITEMS[id];
   if (S.gil < it.price) { UI.log('Not enough gil.', 'sys'); return false; }
   S.gil -= it.price;
@@ -687,6 +718,10 @@ export function buyItem(id) {
 }
 
 export function sellItem(id) {
+  if (Socket.isConnected()) {
+    Socket.emit('shop:sell', { id });
+    return;
+  }
   const it = ITEMS[id];
   const val = Math.max(1, Math.floor((it.price || 10) * 0.3));
   if (!removeItem(id)) return;
@@ -699,6 +734,10 @@ export function sellItem(id) {
 export function equipItem(id) {
   const it = ITEMS[id];
   const p = S.player;
+  if (Socket.isConnected()) {
+    Socket.emit('equip:item', { slot: it.type, id });
+    return;
+  }
   if (it.type === 'weapon') {
     if (it.job !== S.job) { UI.log(`Only a ${JOBS[it.job].name} can equip that.`, 'sys'); return; }
     S.equipPerJob[S.job].weapon = id;
@@ -724,6 +763,10 @@ export function questFor(npcId) {
   return null;
 }
 export function acceptQuest(qid) {
+  if (Socket.isConnected()) {
+    Socket.emit('quest:accept', { qid });
+    return;
+  }
   S.quests[qid] = { state: 'active', n: 0 };
   const q = QUESTS[qid];
   UI.log(`Quest accepted: ${q.name}.`, 'npc');
@@ -740,6 +783,10 @@ export function questComplete(qid) {
   return false;
 }
 export function rewardQuest(qid) {
+  if (Socket.isConnected()) {
+    Socket.emit('quest:reward', { qid });
+    return;
+  }
   const q = QUESTS[qid];
   if (q.type === 'collect') removeItem(q.target, q.count);
   if (q.type === 'deliver') removeItem(q.item, 1);
@@ -757,6 +804,10 @@ export function rewardQuest(qid) {
 export function respawnPlayer() {
   const p = S.player;
   document.getElementById('dead-overlay').style.display = 'none';
+  if (Socket.isConnected()) {
+    Socket.emit('player:respawn');
+    return;
+  }
   p.alive = true;
   p.hp = Math.round(p.maxhp * 0.6); p.mp = Math.round(p.maxmp * 0.6); p.tp = 0;
   p.mesh.position.set(3, S.heightAt(3, 4), 4);
@@ -776,6 +827,17 @@ export function respawnPlayer() {
     c.mesh.position.y = S.heightAt(c.mesh.position.x, c.mesh.position.z);
     resetAnim(c);
   }
+  UI.updateHUD();
+}
+
+export function npcBless() {
+  if (Socket.isConnected()) {
+    Socket.emit('npc:bless');
+    return;
+  }
+  const p = S.player; p.hp = p.maxhp; p.mp = p.maxmp;
+  for (const c of S.party) if (c.alive) { c.hp = c.maxhp; c.mp = c.maxmp; }
+  UI.log('A warm light washes over the party. HP/MP fully restored.', 'magic');
   UI.updateHUD();
 }
 
@@ -946,13 +1008,18 @@ export function updateGame(dt) {
 
   updatePlayer(dt);
   for (const c of S.party) if (c.kind === 'companion') updateCompanion(c, dt);
-  for (const m of S.monsters) updateMonster(m, dt);
-  updateNodes(dt);
+  if (Socket.isConnected()) {
+    // server updates monsters and nodes authoritatively
+  } else {
+    for (const m of S.monsters) updateMonster(m, dt);
+    updateNodes(dt);
+  }
   updateCasting(dt);
   updateBuffsAndRegen(dt);
   updateParticles(dt);
 
   // animations & headings
+  if (p) p.isMoving = p.moving;
   for (const e of [...S.party, ...S.monsters]) { animateEntity(e, dt); if (e.alive) applyHeading(e, dt); e.moving = false; }
   for (const n of S.npcs) { animateEntity(n, dt); n.moving = false; }
 
@@ -972,14 +1039,31 @@ export function updateGame(dt) {
   }
 
   // engage check: auto-attack if enemy targeted & in range (classic spec)
-  if (S.target && S.target.kind === 'monster' && S.target.alive && p.alive && !p.casting) {
-    const st = statsOf(p);
-    if (p.distTo(S.target) <= 2.6) {
-      p.engaged = true;
-      p.attackTimer -= dt;
-      if (p.attackTimer <= 0) {
-        meleeSwing(p, S.target);
-        p.attackTimer = st.delay;
+  if (Socket.isConnected()) {
+    const shouldEngage = S.target && S.target.kind === 'monster' && S.target.alive && p.alive && !p.casting;
+    if (shouldEngage) {
+      if (p.engagedTargetId !== S.target.id) {
+        p.engagedTargetId = S.target.id;
+        p.engaged = true;
+        Socket.emit('combat:engage', { targetId: S.target.id });
+      }
+    } else {
+      if (p.engagedTargetId) {
+        p.engagedTargetId = null;
+        p.engaged = false;
+        Socket.emit('combat:disengage', {});
+      }
+    }
+  } else {
+    if (S.target && S.target.kind === 'monster' && S.target.alive && p.alive && !p.casting) {
+      const st = statsOf(p);
+      if (p.distTo(S.target) <= 2.6) {
+        p.engaged = true;
+        p.attackTimer -= dt;
+        if (p.attackTimer <= 0) {
+          meleeSwing(p, S.target);
+          p.attackTimer = st.delay;
+        }
       }
     }
   }
@@ -1207,16 +1291,40 @@ function updateCasting(dt) {
     c.t += dt;
     if (e === S.player) UI.updateCastbar(c.t / c.total);
     if (c.gather) {
-      if (S.player.distTo({ pos: c.gather.mesh.position }) > 4) { e.casting = null; UI.hideCastbar(); UI.log('Interrupted.', 'sys'); continue; }
-      if (c.t >= c.total) { e.casting = null; UI.hideCastbar(); finishGather(c.gather); }
+      if (S.player.distTo({ pos: c.gather.mesh.position }) > 4) { e.casting = null; UI.hideCastbar(); if (!Socket.isConnected()) UI.log('Interrupted.', 'sys'); continue; }
+      if (c.t >= c.total) {
+        e.casting = null;
+        UI.hideCastbar();
+        if (!Socket.isConnected()) finishGather(c.gather);
+      }
       continue;
     }
     const a = ACTIONS[c.action];
-    if (c.target && !c.target.alive && a.type !== 'buff') { e.casting = null; if (e === S.player) { UI.hideCastbar(); UI.log('Casting interrupted — target is gone.', 'sys'); } continue; }
+    if (c.target && !c.target.alive && a.type !== 'buff') {
+      e.casting = null;
+      if (e === S.player) {
+        UI.hideCastbar();
+        if (!Socket.isConnected()) UI.log('Casting interrupted — target is gone.', 'sys');
+      }
+      continue;
+    }
     if (c.t >= c.total) {
       e.casting = null;
       if (e === S.player) UI.hideCastbar();
-      resolveAction(e, c.action, c.target);
+      if (!Socket.isConnected()) {
+        resolveAction(e, c.action, c.target);
+      }
+    }
+  }
+
+  if (Socket.isConnected()) {
+    for (const m of S.monsters) {
+      if (m.casting) {
+        m.casting.t += dt;
+        if (m.casting.t >= m.casting.total) {
+          m.casting = null;
+        }
+      }
     }
   }
 }
@@ -1277,3 +1385,24 @@ export function loadGame() {
 }
 
 export function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+
+export function findActor(id) {
+  if (!id) return null;
+  // 1. Is it the local player?
+  if (id === 'player' || id === S.charName || (Socket.isConnected() && id === Socket.getId())) {
+    return S.player;
+  }
+  // 2. Is it in the party/companions?
+  for (const c of S.party) {
+    if (c.name === id || c.id === id) return c;
+  }
+  // 3. Is it a server-controlled monster?
+  const m = S.monsters.find(mon => mon.id === id);
+  if (m) return m;
+
+  // 4. Is it a remote player puppet?
+  const puppet = Puppets.getPuppet(id);
+  if (puppet) return puppet;
+
+  return null;
+}

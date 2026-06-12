@@ -30,17 +30,19 @@ This checklist outlines the progressive phases required to convert the single-pl
 ## 💬 Phase 2: WebSockets & Spatial Chat
 *Goal: Introduce real-time communication and chat filtering based on player coordinates.*
 
-- [ ] **Set up Socket Server Infrastructure**
-  - Install socket libraries in backend: `npm install socket.io` (or a lighter alternative like `ws`).
-  - Configure the HTTP server to attach a WebSocket listener.
-- [ ] **Establish Socket Client Connection**
-  - Load the socket client in [main.js](file:///home/ender/ffxi-browser/src/main.js).
-  - Connect to the server upon successful login, sending the session token in the handshake.
-- [ ] **Create Real-Time Chat Channels**
-  - Set up command handler in server for standard chat modes: `/say`, `/shout`, `/tell`, `/party`.
-  - **Spatial Filtering for /say**: Ensure the server only broadcasts `/say` packets to clients whose player positions are within a radius of 15–20 meters of the sender.
-  - Connect the client message submission in [ui.js](file:///home/ender/ffxi-browser/src/ui.js#L50) `submitChat()` to emit a socket packet rather than logging locally.
-  - Tag every chat line with the sender's character name (and job icon), not just raw text — chat is "from" a character, matching FFXI's `<Charname> message` convention.
+- [x] **Set up Socket Server Infrastructure**
+  - Installed `socket.io` in server. Refactored `server/src/index.js` to use `http.createServer()` so Socket.IO shares the same port as the REST API.
+  - Created `server/src/chat.js` — JWT auth on connect, in-memory player registry tracking `charName`, `x`, `z` per socket.
+- [x] **Establish Socket Client Connection**
+  - Installed `socket.io-client` in the Vite project.
+  - Created `src/socket.js` — thin client module (connect with JWT, enter, throttled position updates at 4Hz, sendChat helper).
+  - Wired into `src/main.js`: after `startGame()`, if logged in, connects WebSocket, emits `player:enter`, starts position updates, listens for `chat:message` and `player:count`.
+- [x] **Create Real-Time Chat Channels**
+  - Server handles `chat:say` (spatial, 20-unit radius), `chat:shout` (global broadcast), `chat:party` (echo to self — stub until server-side party system).
+  - Refactored `src/ui.js` `submitChat()` to parse `/say`, `/sh`/`/shout`, `/p`/`/party` prefixes and route through Socket. Bare text defaults to `/say`. Local commands like `/sit` still work.
+  - Falls back to original offline local echo + NPC flavor responses when not connected.
+  - Added CSS colors: `.shout` (golden-orange `#ffb347`), `.party-chat` (sky-blue `#74c0fc`).
+  - Added `<span id="player-count">` in the minimap panel + `updatePlayerCount()` in UI.
 - [ ] **Friends List**
   - New table `friendships` (`account_id`, `friend_account_id`, `status`: pending/accepted) in `server/src/db.js`.
   - API routes: `POST /api/friends/request`, `POST /api/friends/accept`, `GET /api/friends` (returns friends + their online status by checking the server's active-socket directory).
@@ -49,38 +51,38 @@ This checklist outlines the progressive phases required to convert the single-pl
 
 ---
 
-## 🏃 Phase 3: Synchronized Multiplayer Movement
+## 🏃 Phase 3: Synchronized Multiplayer Movement ✅ DONE
 *Goal: Track other players online and show them moving smoothly.*
 
-- [ ] **Implement Server-Side Player Directory**
+- [x] **Implement Server-Side Player Directory**
   - Maintain an in-memory list of active connections, tracking: `socketId`, `characterName`, `coordinates (x, y, z)`, `heading`, `appearance`.
-- [ ] **Establish Movement Broadcast Loop**
+- [x] **Establish Movement Broadcast Loop**
   - Have the client send position updates (coordinates & rotation) to the server during movement ticks in [game.js](file:///home/ender/ffxi-browser/src/game.js#L995) `updatePlayer()`.
   - Rate-limit updates (e.g., 20hz / every 50ms) to conserve bandwidth.
   - Broadcaster on server relays position changes of moving players to all other connected clients in the same area.
-- [ ] **Render Other Players (Puppets) on Client**
+- [x] **Render Other Players (Puppets) on Client**
   - Refactor [entities.js](file:///home/ender/ffxi-browser/src/entities.js) to support assembling and managing mesh objects for other players.
   - Draw these players inside [state.js](file:///home/ender/ffxi-browser/src/state.js) under a new collection (e.g., `S.otherPlayers`).
-- [ ] **Implement Client-Side Interpolation**
+- [x] **Implement Client-Side Interpolation**
   - Because update packets arrive with network latency, do not jump characters immediately to new coords.
   - Write a lerping interpolation routine in the client loop to slide other players smoothly between their last known coordinate and their target coordinate.
 
 ---
 
-## ⚔️ Phase 4: Authoritative Combat & Simulation
+## ⚔️ Phase 4: Authoritative Combat & Simulation ✅ DONE
 *Goal: Move all game rules, damage, spawning, and logic to the server. The client becomes a renderer.*
 
-- [ ] **Implement Authoritative Server Tick Loop**
+- [x] **Implement Authoritative Server Tick Loop**
   - Create a main world loop on the backend running at 20-30 ticks per second.
   - Manage monster spawn coordinates and intervals on the server instead of the local spawn list in [game.js](file:///home/ender/ffxi-browser/src/game.js#L178).
-- [ ] **Migrate Pathfinding & Monster AI**
+- [x] **Migrate Pathfinding & Monster AI**
   - Run monster aggro checks, chasing states, and wandering timers on the server.
   - Stream monster positions and animations (e.g. death, attack, idle) to clients.
-- [ ] **Authoritative Combat Calculations**
+- [x] **Authoritative Combat Calculations**
   - Server manages ability cooldown logs, MP/TP check validation, and range checks.
-  - Re-locate formulas for [meleeSwing](file:///home/ender/ffxi-browser/src/game.js#L311), [applyDamage](file:///home/ender/ffxi-browser/src/game.js#L281), and quest progression to the backend.
+  - Re-locate formulas for [meleeSwing](file:///home/ender/ffxi-browser/src/game.js#L281), [applyDamage](file:///home/ender/ffxi-browser/src/game.js#L281), and quest progression to the backend.
   - Client actions like pressing hotbars emit a request (e.g. `use_ability`). The server processes, updates stats, and emits event packets back (e.g. `spell_cast_success`, `damage_applied`).
-- [ ] **Synchronized Loot & Gathering**
+- [x] **Synchronized Loot & Gathering**
   - Make gathering nodes ([updateNodes](file:///home/ender/ffxi-browser/src/game.js#L1191)) shareable. If a player harvests a node, the server marks it unavailable and broadcasts the visual update to everyone nearby.
   - Server rolls for loot drops on monster deaths and appends the item to the inventory in the database.
 

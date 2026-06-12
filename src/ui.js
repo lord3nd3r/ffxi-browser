@@ -6,9 +6,10 @@ import { JOBS, ACTIONS, ITEMS, QUESTS, RECIPES, VENDOR_STOCK, expToNext, MAX_LEV
 import {
   G, hotbarList, useHotbarSlot, countItem, questFor, acceptQuest, questComplete, rewardQuest,
   buyItem, sellItem, equipItem, useConsumable, craftRecipe, changeJob, gainExp, requestInteract,
-  tryAction, autoCfg, recruitCompanion,
+  tryAction, autoCfg, recruitCompanion, npcBless,
 } from './game.js';
 import * as API from './api.js';
+import * as Socket from './socket.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -30,34 +31,55 @@ export function log(msg, cls = 'cbt') {
 
 export function openChat() { S.chatOpen = true; const i = $('chat-input'); i.style.display = 'block'; i.focus(); }
 export function closeChat() { S.chatOpen = false; const i = $('chat-input'); i.value = ''; i.style.display = 'none'; i.blur(); }
-function handleChatCommand(cmd) {
+// local-only slash commands (no network)
+function handleLocalCommand(cmd) {
   const parts = cmd.trim().split(' ');
   const main = parts[0].toLowerCase();
   if (main === '/sit') {
     const p = S.player;
     if (p && p.alive) {
       p.sitting = !p.sitting;
-      if (p.sitting) {
-        log(`${S.charName} sits down.`, 'sys');
-      } else {
-        log(`${S.charName} stands up.`, 'sys');
-      }
+      log(`${S.charName} ${p.sitting ? 'sits down' : 'stands up'}.`, 'sys');
     }
-  } else {
-    log(`Unknown command: ${main}`, 'sys');
+    return true;
   }
+  return false; // not a local command
+}
+
+// Parse chat input into { channel, body } or null for local commands.
+function parseChatInput(text) {
+  if (!text.startsWith('/')) return { channel: 'say', body: text };
+  const space = text.indexOf(' ');
+  const cmd = (space > 0 ? text.slice(0, space) : text).toLowerCase();
+  const body = space > 0 ? text.slice(space + 1).trim() : '';
+  if (cmd === '/say' || cmd === '/s') return body ? { channel: 'say', body } : null;
+  if (cmd === '/shout' || cmd === '/sh') return body ? { channel: 'shout', body } : null;
+  if (cmd === '/party' || cmd === '/p') return body ? { channel: 'party', body } : null;
+  return null; // not a chat channel prefix
 }
 
 export function submitChat() {
   const i = $('chat-input');
   const text = i.value.trim();
   if (text) {
-    if (text.startsWith('/')) {
-      handleChatCommand(text);
-    } else {
-      log(`${S.charName} : ${text}`, 'say');
-      if (/hello|hi|hey/i.test(text)) setTimeout(() => log('Lina : Hello! Stay close to Garrick out there, okay?', 'say'), 600);
-      else if (Math.random() < 0.25) setTimeout(() => log('Garrick : Hm. Keep your blade sharp.', 'say'), 800);
+    // try local-only commands first (/sit, etc.)
+    if (text.startsWith('/') && handleLocalCommand(text)) {
+      closeChat();
+      return;
+    }
+    const parsed = parseChatInput(text);
+    if (parsed) {
+      if (Socket.isConnected()) {
+        // route through the server — the server echoes back to us via chat:message
+        Socket.sendChat(parsed.channel, parsed.body);
+      } else {
+        // offline: local echo with NPC flavor responses
+        log(`${S.charName} : ${parsed.body}`, 'say');
+        if (/hello|hi|hey/i.test(parsed.body)) setTimeout(() => log('Lina : Hello! Stay close to Garrick out there, okay?', 'say'), 600);
+        else if (Math.random() < 0.25) setTimeout(() => log('Garrick : Hm. Keep your blade sharp.', 'say'), 800);
+      }
+    } else if (text.startsWith('/')) {
+      log(`Unknown command. Try /say, /shout, /party, or /sit.`, 'sys');
     }
   }
   closeChat();
@@ -160,6 +182,12 @@ export function updateHUD() {
 
   updateHotbarCooldowns();
   updateMinimap();
+}
+
+/** Show the number of players online (called from socket events). */
+export function updatePlayerCount(count) {
+  const el = $('player-count');
+  if (el) el.textContent = count > 0 ? `${count} online` : '';
 }
 
 export function updateTargetFrame() {
@@ -372,11 +400,7 @@ export function openNpcDialog(npc) {
 
   if (npc.npc.role === 'weapons') opts.push({ label: 'Browse Wares', fn: () => openShop('weapons') });
   if (npc.npc.role === 'items') opts.push({ label: 'Browse Wares', fn: () => openShop('items') });
-  if (id === 'father_odo') opts.push({ label: 'Receive Blessing (free heal)', fn: () => {
-    const p = S.player; p.hp = p.maxhp; p.mp = p.maxmp;
-    for (const c of S.party) if (c.alive) { c.hp = c.maxhp; c.mp = c.maxmp; }
-    log('A warm light washes over the party. HP/MP fully restored.', 'magic');
-  }});
+  if (id === 'father_odo') opts.push({ label: 'Receive Blessing (free heal)', fn: () => npcBless() });
   if (id === 'eustace') opts.push({ label: 'Where should I hunt?', keep: true, fn: () => {
     $('dlg-body').innerHTML = '<p><i>Hares and wasps roam just outside the gate — fine prey for a fresh adventurer. Mandragoras lurk in the eastern woods. The goblin camps southwest are for seasoned fighters, and past them… orcs. Stay clear of the old ruins until you\'re strong, friend.</i></p>';
   }});
