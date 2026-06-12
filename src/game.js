@@ -178,7 +178,7 @@ export function initGame(charData) {
   S.party = [p];
   COMPANIONS.forEach((c, i) => {
     if (S.recruited[c.name]) addCompanion(c, { x: 3 + (i + 1) * 1.6, z: 4 - (i + 1) * 1.2 });
-    else spawnAlly(c, { x: 6 - i * 6, z: -1 - i * 4 });   // waiting by the crystal
+    else spawnAlly(c, { x: 6 - i * 6, z: 2 });   // waiting near the crystal, on clear ground
   });
 
   // monsters
