@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vana'diel Reverie — a FFXI-style browser RPG</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    body { font-family: "Verdana", "Geneva", sans-serif; font-size: 13px; color: #e8e4d8; user-select: none; }
+    #app { position: fixed; inset: 0; }
+    canvas.webgl { display: block; }
+
+    /* ---------- shared chrome ---------- */
+    /* FFXI-style window: flat translucent navy, thin pale border */
+    .panel {
+      background: linear-gradient(rgba(34,48,88,.72), rgba(16,24,52,.78));
+      border: 1px solid rgba(190,202,228,.6);
+      outline: 1px solid rgba(8,12,28,.8);
+      border-radius: 3px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.45);
+    }
+    .bar { position: relative; height: 12px; background: #15182a; border: 1px solid #000; border-radius: 3px; overflow: hidden; }
+    .bar .fill { position: absolute; inset: 0; transform-origin: left; transition: transform .15s linear; }
+    .bar.hp .fill { background: linear-gradient(#7fe07f, #2f9e44); }
+    .bar.hp.low .fill { background: linear-gradient(#ffd43b, #e8890c); }
+    .bar.hp.crit .fill { background: linear-gradient(#ff8787, #d9480f); }
+    .bar.mp .fill { background: linear-gradient(#a5b4fc, #4263eb); }
+    .bar.tp .fill { background: linear-gradient(#ffe066, #f59f00); }
+    .bar.tp.ready .fill { background: linear-gradient(#fff3bf, #ffd43b); box-shadow: 0 0 8px #ffd43b; }
+    .bar.xp .fill { background: linear-gradient(#d0bfff, #7048e8); }
+    .bar.cast .fill { background: linear-gradient(#99e9f2, #1098ad); }
+    .bar .txt { position: absolute; inset: 0; text-align: center; font-size: 9px; line-height: 12px; color: #fff; text-shadow: 0 1px 2px #000; }
+
+    /* ---------- target frame ---------- */
+    #target-frame { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 260px; padding: 8px 10px; display: none; }
+    #target-frame .name { font-size: 14px; font-weight: bold; margin-bottom: 4px; text-shadow: 0 1px 2px #000; }
+    #target-frame .name .lv { color: #ffd43b; font-weight: normal; font-size: 11px; }
+
+    /* ---------- party list ---------- */
+    #party { position: absolute; right: 12px; top: 218px; width: 190px; display: flex; flex-direction: column; gap: 6px; }
+    .draggable { touch-action: none; }
+    .draggable:hover { outline: 1px dashed rgba(255,212,59,.35); cursor: grab; }
+    .draggable.dragging { outline: 1px dashed #ffd43b; cursor: grabbing; opacity: .85; }
+    /* FFXI party list: floating names + thin bars, no window chrome */
+    .pmember.panel { padding: 3px 4px; cursor: pointer; background: none; border: none; outline: none; box-shadow: none; }
+    .pmember.selected { background: rgba(255,212,59,.08); outline: 1px solid rgba(255,212,59,.55); border-radius: 2px; }
+    .pmember .name { font-size: 12.5px; font-weight: bold; margin-bottom: 2px; display: flex; justify-content: space-between; text-shadow: 1px 1px 2px #000, 0 0 4px rgba(0,0,0,.9); }
+    .pmember .name .lv { color: #b9cdf0; font-weight: normal; font-size: 10px; }
+    .pmember .bar { height: 7px; margin-top: 2px; border-color: rgba(0,0,0,.85); }
+    .pmember .bar .txt { font-size: 8px; line-height: 7px; }
+
+    /* ---------- player vitals ---------- */
+    #vitals { position: absolute; right: 12px; bottom: 162px; width: 240px; padding: 8px 10px; }
+    #vitals .row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+    #vitals .lbl { width: 22px; font-size: 10px; color: #9bb0e8; }
+    #vitals .bar { flex: 1; }
+    #vitals #job-line { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px; }
+    #vitals #gil { color: #ffd43b; }
+    #auto-chip { font-size: 9px; padding: 1px 6px; border-radius: 3px; border: 1px solid #3d4f7d; color: #5a6a88; cursor: pointer; }
+    #auto-chip.on { border-color: #ffd43b; color: #ffd43b; text-shadow: 0 0 6px rgba(255,212,59,.6); }
+
+    /* ---------- magic book ---------- */
+    .mb-row { display: flex; align-items: center; gap: 6px; padding: 4px 4px; border-bottom: 1px solid rgba(80,100,160,.22); }
+    .mb-row:hover { background: rgba(80,100,160,.12); }
+    .mb-row.locked { opacity: .38; }
+    .mb-ico { font-size: 17px; width: 24px; text-align: center; }
+    .mb-main { flex: 1; min-width: 0; }
+    .mb-name { font-size: 12px; color: #e8e4d8; }
+    .mb-name .lv { color: #9bb0e8; font-size: 10px; }
+    .mb-sub { font-size: 9.5px; color: #8a96b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mb-tgl { font-size: 13px; width: 26px; height: 22px; line-height: 22px; text-align: center; border: 1px solid #2c3a60; border-radius: 3px; cursor: pointer; opacity: .35; }
+    .mb-tgl.on { opacity: 1; border-color: #ffd43b; background: rgba(255,212,59,.12); }
+    .mb-pri { display: flex; flex-direction: column; }
+    .mb-pri span { font-size: 8px; line-height: 8px; cursor: pointer; color: #9bb0e8; padding: 1px 3px; }
+    .mb-pri span:hover { color: #ffd43b; }
+    .mb-cast { font-size: 10px; padding: 2px 7px; }
+    .mb-head { font-size: 11px; color: #ffe066; margin: 8px 0 2px; border-bottom: 1px solid #3d4f7d; }
+
+    /* ---------- hotbar ---------- */
+    #hotbar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 4px; padding: 6px; }
+    .slot { position: relative; width: 46px; height: 46px; background: rgba(8,10,22,.85); border: 1px solid #3d4f7d; border-radius: 4px; cursor: pointer; overflow: hidden; }
+    .slot:hover { border-color: #ffd43b; }
+    .slot .key { position: absolute; top: 1px; left: 3px; font-size: 9px; color: #ffd43b; z-index: 2; text-shadow: 0 1px 1px #000; }
+    .slot .ico { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    .slot .nm { position: absolute; bottom: 1px; left: 0; right: 0; font-size: 7px; text-align: center; color: #cdd7f3; white-space: nowrap; overflow: hidden; }
+    .slot .cd { position: absolute; inset: 0; background: rgba(0,0,0,.65); color: #fff; display: none; align-items: center; justify-content: center; font-size: 13px; z-index: 3; }
+    .slot.disabled { opacity: .35; }
+
+    /* ---------- FFXI-style log windows: chat (left) + battle (right) ---------- */
+    #chat { position: absolute; left: 12px; bottom: 12px; width: 370px; }
+    #battlelog-wrap { position: absolute; right: 12px; bottom: 12px; width: 370px; }
+    .ffxi-log {
+      height: 138px; overflow-y: auto; padding: 4px 7px;
+      background: rgba(4,6,16,.55);
+      border: 1px solid rgba(190,200,225,.35);
+      border-radius: 2px;
+      font-family: Tahoma, Verdana, sans-serif;
+      font-size: 11.5px; line-height: 1.42; letter-spacing: .1px;
+      scrollbar-width: thin; scrollbar-color: #3d4f7d transparent;
+      text-shadow: 1px 1px 1px rgba(0,0,0,.9);
+    }
+    /* FFXI text colors */
+    .ffxi-log .cbt   { color: #f2f2ee; }            /* combat: white            */
+    .ffxi-log .dmg-in{ color: #f2f2ee; }            /* incoming: also white     */
+    .ffxi-log .gain  { color: #a8d3ee; }            /* defeat / EXP: light blue */
+    .ffxi-log .loot  { color: #e7d77c; }            /* items / gil: yellow      */
+    .ffxi-log .heal  { color: #b5e6ad; }            /* recovery: light green    */
+    .ffxi-log .magic { color: #d9cdf6; }            /* casting: lavender        */
+    .ffxi-log .npc   { color: #f0d8a8; }            /* NPC dialogue             */
+    .ffxi-log .sys   { color: #9fb6c8; }            /* system: gray-blue        */
+    .ffxi-log .say   { color: #ffffff; }
+    #chat-input { width: 100%; margin-top: 3px; padding: 4px 8px; background: rgba(7,10,24,.85); border: 1px solid rgba(150,160,190,.5); border-radius: 2px; color: #fff; font-size: 11.5px; font-family: Tahoma, Verdana, sans-serif; display: none; outline: none; }
+
+
+    /* ---------- minimap ---------- */
+    #minimap-wrap { position: absolute; right: 12px; top: 12px; width: 150px; padding: 5px; text-align: center; }
+    #minimap { width: 140px; height: 140px; border-radius: 4px; background: #1a2a18; }
+    #zone-name { font-size: 10px; color: #ffe066; margin-top: 3px; }
+    #clock { font-size: 10px; color: #9bb0e8; }
+
+    /* ---------- cast bar ---------- */
+    #castbar { position: absolute; left: 50%; bottom: 130px; transform: translateX(-50%); width: 260px; padding: 5px 8px; display: none; }
+    #castbar .nm { font-size: 11px; text-align: center; margin-bottom: 3px; color: #99e9f2; }
+
+    /* ---------- floating combat text ---------- */
+    .floater { position: absolute; pointer-events: none; font-weight: bold; font-size: 16px; text-shadow: 0 1px 3px #000, 0 0 6px rgba(0,0,0,.8); z-index: 50; transform: translate(-50%, -50%); white-space: nowrap; }
+    .floater.dmg  { color: #fff; }
+    .floater.dmg-in { color: #ff6b6b; }
+    .floater.heal { color: #69db7c; }
+    .floater.magic{ color: #b197fc; }
+    .floater.miss { color: #adb5bd; font-size: 13px; }
+    .floater.crit { color: #ffd43b; font-size: 20px; }
+    .floater.xp   { color: #d0bfff; font-size: 13px; }
+
+    /* ---------- dialog / windows ---------- */
+    #dialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 460px; max-height: 70vh; padding: 14px; display: none; z-index: 100; }
+    #dialog h3 { font-size: 15px; color: #ffe066; margin-bottom: 8px; border-bottom: 1px solid #3d4f7d; padding-bottom: 6px; }
+    #dialog .body { font-size: 12px; line-height: 1.6; max-height: 46vh; overflow-y: auto; scrollbar-width: thin; }
+    #dialog .opts { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .btn { padding: 6px 14px; background: linear-gradient(#3d4f7d, #28365c); border: 1px solid #5b74b5; border-radius: 4px; color: #fff; font-size: 12px; cursor: pointer; font-family: inherit; }
+    .btn:hover { background: linear-gradient(#5b74b5, #3d4f7d); }
+    .btn.gold { border-color: #ffd43b; }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .listrow { display: flex; justify-content: space-between; align-items: center; padding: 5px 6px; border-bottom: 1px solid rgba(80,100,160,.25); }
+    .listrow:hover { background: rgba(80,100,160,.15); }
+    .listrow .sub { color: #8a96b8; font-size: 10px; }
+    .price { color: #ffd43b; margin-right: 8px; }
+
+    /* ---------- context menu ---------- */
+    #ctxmenu { position: absolute; min-width: 120px; padding: 4px; display: none; z-index: 120; }
+    #ctxmenu .item { padding: 5px 12px; font-size: 12px; cursor: pointer; border-radius: 3px; }
+    #ctxmenu .item:hover { background: rgba(91,116,181,.45); }
+
+    /* ---------- top-left help hint ---------- */
+    #hint { position: absolute; left: 12px; top: 12px; font-size: 10px; color: #8a96b8; text-shadow: 0 1px 2px #000; line-height: 1.6; }
+    #hint b { color: #cdd7f3; }
+
+    /* ---------- quest tracker ---------- */
+    #tracker { position: absolute; left: 12px; top: 110px; width: 220px; font-size: 11px; text-shadow: 0 1px 2px #000; }
+    #tracker .q { margin-bottom: 6px; }
+    #tracker .qn { color: #ffe066; }
+    #tracker .qp { color: #cdd7f3; }
+    #tracker .qp.done { color: #69db7c; }
+
+    /* ---------- loading ---------- */
+    #loading { position: fixed; inset: 0; background: #060810; z-index: 999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+    #loading h1 { font-size: 26px; color: #ffe066; letter-spacing: 2px; text-shadow: 0 0 18px rgba(255,224,102,.5); }
+    #loading p { color: #8a96b8; font-size: 12px; }
+    #loading .crystal { width: 40px; height: 40px; background: linear-gradient(135deg,#74c0fc,#4263eb); transform: rotate(45deg); animation: spin 2.4s ease-in-out infinite; box-shadow: 0 0 30px #4dabf7; }
+    @keyframes spin { 50% { transform: rotate(225deg) scale(.8); } }
+
+    #dead-overlay { position: fixed; inset: 0; background: rgba(40,0,0,.45); z-index: 200; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
+    #dead-overlay h2 { color: #ff8787; font-size: 22px; text-shadow: 0 2px 8px #000; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hint">
+    <b>Left-click</b> ground: move &nbsp;·&nbsp; <b>L+R mouse</b>: run &nbsp;·&nbsp; <b>R-drag</b>: camera &nbsp;·&nbsp; <b>WASD</b>: move<br/>
+    <b>Tab</b>: target &nbsp;·&nbsp; <b>1–0</b>: hotbar &nbsp;·&nbsp; <b>M</b>: magic book &nbsp;·&nbsp; <b>R-click</b> target: menu &nbsp;·&nbsp; <b>F</b>: 1st person &nbsp;·&nbsp; <b>?</b> Help
+  </div>
+
+  <div id="tracker"></div>
+
+  <div id="target-frame" class="panel">
+    <div class="name"><span id="tgt-name">—</span> <span class="lv" id="tgt-lv"></span></div>
+    <div class="bar hp"><div class="fill" id="tgt-hp"></div><div class="txt" id="tgt-hp-txt"></div></div>
+  </div>
+
+  <div id="party"></div>
+
+  <div id="minimap-wrap" class="panel">
+    <canvas id="minimap" width="140" height="140"></canvas>
+    <div id="zone-name">West Sarutaria Plains</div>
+    <div id="clock">Day · 8:00</div>
+  </div>
+
+  <div id="vitals" class="panel">
+    <div id="job-line"><span id="job-name">WAR Lv.1</span><span id="auto-chip" title="Auto-magic (M)">AUTO</span><span id="gil">0 G</span></div>
+    <div class="row"><span class="lbl">HP</span><div class="bar hp"><div class="fill" id="p-hp"></div><div class="txt" id="p-hp-txt"></div></div></div>
+    <div class="row"><span class="lbl">MP</span><div class="bar mp"><div class="fill" id="p-mp"></div><div class="txt" id="p-mp-txt"></div></div></div>
+    <div class="row"><span class="lbl">TP</span><div class="bar tp"><div class="fill" id="p-tp"></div><div class="txt" id="p-tp-txt"></div></div></div>
+    <div class="row"><span class="lbl">EXP</span><div class="bar xp"><div class="fill" id="p-xp"></div><div class="txt" id="p-xp-txt"></div></div></div>
+  </div>
+
+  <div id="castbar" class="panel">
+    <div class="nm" id="cast-name"></div>
+    <div class="bar cast"><div class="fill" id="cast-fill"></div></div>
+  </div>
+
+  <div id="hotbar" class="panel"></div>
+
+  <div id="chat">
+    <div id="log" class="ffxi-log"></div>
+    <input id="chat-input" type="text" maxlength="120" placeholder="" />
+  </div>
+
+  <div id="battlelog-wrap">
+    <div id="battlelog" class="ffxi-log"></div>
+  </div>
+
+  <div id="dialog" class="panel">
+    <h3 id="dlg-title"></h3>
+    <div class="body" id="dlg-body"></div>
+    <div class="opts" id="dlg-opts"></div>
+  </div>
+
+  <div id="ctxmenu" class="panel"></div>
+
+  <div id="dead-overlay">
+    <h2>You have fallen…</h2>
+    <button class="btn gold" id="btn-homepoint">Return to Home Point</button>
+  </div>
+
+  <div id="loading">
+    <div class="crystal"></div>
+    <h1>VANA'DIEL REVERIE</h1>
+    <p id="load-status">Weaving the crystal's dream…</p>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
