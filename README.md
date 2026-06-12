@@ -13,6 +13,8 @@ crafting recipes.
 All 3D assets are free CC0 packs (Quaternius Universal Base Characters / Modular Fantasy
 Outfits / Universal Animation Library / animated monsters, KayKit environment kits).
 
+![Party at the home point](docs/screenshot.jpg)
+
 ---
 
 ## Requirements
