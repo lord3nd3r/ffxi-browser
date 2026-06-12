@@ -13,9 +13,6 @@ crafting recipes.
 All 3D assets are free CC0 packs (Quaternius Universal Base Characters / Modular Fantasy
 Outfits / Universal Animation Library / animated monsters, KayKit environment kits).
 
-![Party on the beach at West Sarutaria](docs/screenshot-beach.jpg)
-![Field exploration](docs/screenshot-field.jpg)
-
 ---
 
 ## Requirements
