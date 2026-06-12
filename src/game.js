@@ -6,6 +6,7 @@ import { JOBS, ACTIONS, ITEMS, MONSTERS, SPAWNS, NPCS, QUESTS, RECIPES, VENDOR_S
 import { Entity, makeNameplate, spawnMonster, makeCharacterModel, setLoopAnim, playOnce } from './entities.js';
 import * as UI from './ui.js';
 import { treeAt, env } from './world.js';
+import * as API from './api.js';
 
 export const G = { now: 0, particles: [], targetRing: null, pendingInteract: null, combatTimer: 0, saveTimer: 0 };
 
@@ -1239,10 +1240,12 @@ function updateBuffsAndRegen(dt) {
 // save / load
 // =====================================================================
 const SAVE_KEY = 'vanadiel_reverie_v1';
+const CLOUD_SYNC_MIN_INTERVAL = 15; // seconds between cloud saves
 
-export function saveGame() {
-  if (!S.player) return;
-  const data = {
+let lastCloudSync = 0;
+
+function snapshot() {
+  return {
     charName: S.charName, appearance: S.appearance,
     job: S.job, jobs: S.jobs, gil: S.gil,
     inventory: S.inventory, equipPerJob: S.equipPerJob,
@@ -1251,7 +1254,18 @@ export function saveGame() {
     vitals: { hp: Math.round(S.player.hp), mp: Math.round(S.player.mp) },
     pos: { x: Math.round(S.player.pos.x), z: Math.round(S.player.pos.z) },
   };
+}
+
+export function saveGame(opts = {}) {
+  if (!S.player) return;
+  const data = snapshot();
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch (e) { /* private mode */ }
+
+  if (!API.isEnabled() || !API.getToken()) return;
+  const force = !!opts.force;
+  if (!force && G.now - lastCloudSync < CLOUD_SYNC_MIN_INTERVAL) return;
+  lastCloudSync = G.now;
+  API.saveCharacter(data, !!opts.keepalive).catch((e) => console.warn('Cloud save failed:', e.message));
 }
 
 export function loadGame() {

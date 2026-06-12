@@ -8,6 +8,7 @@ import {
   buyItem, sellItem, equipItem, useConsumable, craftRecipe, changeJob, gainExp, requestInteract,
   tryAction, autoCfg, recruitCompanion,
 } from './game.js';
+import * as API from './api.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -626,15 +627,54 @@ export function resetLayout() {
 }
 
 // =====================================================================
+// account login (only shown when a cloud save server is configured)
+// =====================================================================
+const ACC_INPUT_STYLE = 'width:100%;margin:6px 0;padding:6px;background:#10142a;border:1px solid #4a5a8a;border-radius:4px;color:#fff;font-size:13px';
+
+// Resolves to true if the player chose to play offline (no cloud sync).
+export function loginScreen() {
+  return new Promise((resolve) => {
+    const body = `
+      <p>Sign in to sync your character to the cloud, or play offline — offline saves stay
+      in this browser only.</p>
+      <input id="acc-user" placeholder="Username" maxlength="20" autocomplete="username" style="${ACC_INPUT_STYLE}" />
+      <input id="acc-pass" type="password" placeholder="Password" autocomplete="current-password" style="${ACC_INPUT_STYLE}" />
+      <p id="acc-err" style="color:#ff6b6b;min-height:18px;font-size:12px"></p>
+    `;
+    showDialog("Vana'diel Reverie", body, [
+      { label: 'Log In', gold: true, keep: true, fn: () => doAuth(API.login) },
+      { label: 'Register', keep: true, fn: () => doAuth(API.register) },
+      { label: 'Play Offline', fn: () => resolve(true) },
+    ]);
+
+    async function doAuth(method) {
+      const user = $('acc-user').value.trim();
+      const pass = $('acc-pass').value;
+      $('acc-err').textContent = '';
+      try {
+        await method(user, pass);
+        closeDialog();
+        resolve(false);
+      } catch (e) {
+        $('acc-err').textContent = e.message;
+      }
+    }
+  });
+}
+
+// =====================================================================
 // character creation
 // =====================================================================
 export function charCreate(saved, onDone) {
   if (saved) {
     // returning player
-    showDialog('Welcome back!', `<p>Resume your adventure as <b>${saved.charName}</b> (${saved.job} Lv.${saved.jobs[saved.job].level})?</p>`, [
-      { label: 'Continue', gold: true, fn: () => onDone(null) },
-      { label: 'New Character (erases save)', fn: () => { localStorage.removeItem('vanadiel_reverie_v1'); location.reload(); } },
-    ]);
+    const opts = [{ label: 'Continue', gold: true, fn: () => onDone(null) }];
+    if (API.isEnabled() && API.getToken()) {
+      opts.push({ label: 'Log Out', fn: () => { API.clearToken(); location.reload(); } });
+    } else {
+      opts.push({ label: 'New Character (erases save)', fn: () => { localStorage.removeItem('vanadiel_reverie_v1'); location.reload(); } });
+    }
+    showDialog('Welcome back!', `<p>Resume your adventure as <b>${saved.charName}</b> (${saved.job} Lv.${saved.jobs[saved.job].level})?</p>`, opts);
     return;
   }
   const skins = [0xe8c8a8, 0xd8a87c, 0x9a6a4a];

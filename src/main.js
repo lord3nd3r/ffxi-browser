@@ -13,6 +13,7 @@ import { initGame, updateGame, loadGame, saveGame, respawnPlayer } from './game.
 import { initControls, updateCamera } from './controls.js';
 import * as UI from './ui.js';
 import { STARTER_WEAPON } from './data.js';
+import * as API from './api.js';
 
 const app = document.getElementById('app');
 window.__S = S; // debug/testing handle
@@ -103,7 +104,7 @@ function startGame(charData, saved) {
   UI.updateHUD();
   initControls(renderer.domElement);
   document.getElementById('btn-homepoint').addEventListener('click', respawnPlayer);
-  window.addEventListener('beforeunload', saveGame);
+  window.addEventListener('beforeunload', () => saveGame({ force: true, keepalive: true }));
   running = true;
 }
 
@@ -120,10 +121,30 @@ import('./entities.js').then(async ({ preloadModels }) => {
     ]);
     initWorld();
     document.getElementById('loading').style.display = 'none';
-    const saved = loadGame();
+
+    const localSaved = loadGame();
+    let cloudChar = null;
+    let cloudActive = false;
+
+    if (API.isEnabled()) {
+      if (API.getToken()) {
+        try { cloudChar = await API.fetchCharacter(); cloudActive = true; }
+        catch (e) { API.clearToken(); }
+      }
+      if (!cloudActive) {
+        const offline = await UI.loginScreen();
+        if (!offline) {
+          try { cloudChar = await API.fetchCharacter(); cloudActive = true; }
+          catch (e) { API.clearToken(); }
+        }
+      }
+    }
+
+    const saved = cloudChar || (!cloudActive ? localSaved : null);
     UI.charCreate(saved, (fresh) => {
       if (fresh) startGame(fresh, null);
       else startGame(null, saved);
+      if (cloudActive) saveGame({ force: true });
       setTimeout(() => UI.openHelp(), 400);
     });
   } catch (err) {

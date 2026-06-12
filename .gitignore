@@ -5,3 +5,5 @@ scratch
 ss.png
 ss-1jpg
 .claude
+.env
+.env.local

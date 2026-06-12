@@ -128,6 +128,12 @@ publish directory `dist`.
 
 Progress saves automatically to the browser's localStorage (per browser/device).
 
+## Cloud saves (optional)
+
+`/server` is an optional Node API for accounts and cross-device cloud saves — see
+[server/README.md](server/README.md). The game works fully without it; this is purely
+opt-in via the `VITE_API_URL` env var. The Vercel demo does not use it.
+
 ## Project layout
 
 ```
@@ -146,6 +152,7 @@ public/
   models/env/     KayKit nature / town / props / dungeon kits
   textures/       Terrain detail textures
 test/             Puppeteer smoke tests and screenshot scripts
+server/           Optional cloud-save API (accounts, cross-device character saves)
 ```
 
 ### Dev verification scripts
