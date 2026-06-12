@@ -48,3 +48,19 @@ export async function fetchCharacter() {
 export async function saveCharacter(data, keepalive = false) {
   return request('/api/character/save', { method: 'POST', body: JSON.stringify(data), keepalive });
 }
+
+export async function fetchFriends() {
+  return request('/api/friends');
+}
+
+export async function addFriend(friendName) {
+  return request('/api/friends/request', { method: 'POST', body: JSON.stringify({ friendName }) });
+}
+
+export async function acceptFriend(friendName) {
+  return request('/api/friends/accept', { method: 'POST', body: JSON.stringify({ friendName }) });
+}
+
+export async function removeFriend(friendName) {
+  return request('/api/friends/remove', { method: 'POST', body: JSON.stringify({ friendName }) });
+}

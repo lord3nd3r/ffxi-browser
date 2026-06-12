@@ -43,6 +43,10 @@ function handleLocalCommand(cmd) {
     }
     return true;
   }
+  if (main === '/friends' || main === '/friend') {
+    openFriendsList();
+    return true;
+  }
   return false; // not a local command
 }
 
@@ -55,6 +59,15 @@ function parseChatInput(text) {
   if (cmd === '/say' || cmd === '/s') return body ? { channel: 'say', body } : null;
   if (cmd === '/shout' || cmd === '/sh') return body ? { channel: 'shout', body } : null;
   if (cmd === '/party' || cmd === '/p') return body ? { channel: 'party', body } : null;
+  if (cmd === '/tell' || cmd === '/t') {
+    const nextSpace = body.indexOf(' ');
+    if (nextSpace > 0) {
+      const targetName = body.slice(0, nextSpace).trim();
+      const whisperMsg = body.slice(nextSpace + 1).trim();
+      return { channel: 'tell', targetName, body: whisperMsg };
+    }
+    return null;
+  }
   return null; // not a chat channel prefix
 }
 
@@ -70,13 +83,20 @@ export function submitChat() {
     const parsed = parseChatInput(text);
     if (parsed) {
       if (Socket.isConnected()) {
-        // route through the server — the server echoes back to us via chat:message
-        Socket.sendChat(parsed.channel, parsed.body);
+        if (parsed.channel === 'tell') {
+          Socket.sendTell(parsed.targetName, parsed.body);
+        } else {
+          Socket.sendChat(parsed.channel, parsed.body);
+        }
       } else {
-        // offline: local echo with NPC flavor responses
-        log(`${S.charName} : ${parsed.body}`, 'say');
-        if (/hello|hi|hey/i.test(parsed.body)) setTimeout(() => log('Lina : Hello! Stay close to Garrick out there, okay?', 'say'), 600);
-        else if (Math.random() < 0.25) setTimeout(() => log('Garrick : Hm. Keep your blade sharp.', 'say'), 800);
+        if (parsed.channel === 'tell') {
+          log('You are offline. Cannot send whispers.', 'sys');
+        } else {
+          // offline: local echo with NPC flavor responses
+          log(`${S.charName} : ${parsed.body}`, 'say');
+          if (/hello|hi|hey/i.test(parsed.body)) setTimeout(() => log('Lina : Hello! Stay close to Garrick out there, okay?', 'say'), 600);
+          else if (Math.random() < 0.25) setTimeout(() => log('Garrick : Hm. Keep your blade sharp.', 'say'), 800);
+        }
       }
     } else if (text.startsWith('/')) {
       log(`Unknown command. Try /say, /shout, /party, or /sit.`, 'sys');
@@ -586,6 +606,143 @@ export function openSpellbook() {
       tryAction(S.player, id);
     }
   };
+}
+
+export async function openFriendsList(isRefresh = false) {
+  if (!Socket.isConnected()) {
+    log('Friends List is only available when connected to the server.', 'sys');
+    return;
+  }
+  // If it's a manual toggle and the UI is already open, close it
+  if (!isRefresh && S.uiOpen && $('dlg-title').textContent === 'Friends List') {
+    closeDialog();
+    return;
+  }
+
+  try {
+    const { friends, incoming, outgoing } = await API.fetchFriends();
+
+    let body = `
+      <div style="margin-bottom:12px; display:flex; gap:6px;">
+        <input type="text" id="add-friend-name" placeholder="Character Name" style="flex:1; background:rgba(0,0,0,0.4); border:1px solid #4a5472; color:#fff; padding:4px 8px; border-radius:3px;" />
+        <button class="btn gold" id="btn-add-friend" style="padding: 4px 12px;">Send Request</button>
+      </div>
+      <div style="max-height: 280px; overflow-y: auto; text-align: left;">
+    `;
+
+    // 1. Friends
+    body += `<p style="color:#ffe066; font-weight:bold; border-bottom:1px solid #4a5472; padding-bottom:4px; margin-top:8px; margin-bottom:6px;">Friends</p>`;
+    if (!friends.length) {
+      body += '<p style="color:#8a96b8; font-size:11px; margin-bottom:10px;">No friends added yet.</p>';
+    } else {
+      for (const f of friends) {
+        const statusText = f.online ? '<span style="color:#69db7c; font-weight:bold;">Online</span>' : '<span style="color:#8a96b8;">Offline</span>';
+        const sub = `${f.job} Lv.${f.level} · ${statusText}`;
+        let tellBtn = f.online ? `<button class="btn" data-tell="${f.name}" style="margin-right:4px;">Tell</button>` : '';
+        body += `
+          <div class="listrow" style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
+            <span>${f.name}<br/><span class="sub" style="font-size:10px; color:#8a96b8;">${sub}</span></span>
+            <span>
+              ${tellBtn}
+              <button class="btn" data-remove="${f.name}" style="background:#c92a2a; border-color:#c92a2a; color:#fff;">Remove</button>
+            </span>
+          </div>
+        `;
+      }
+    }
+
+    // 2. Incoming
+    body += `<p style="color:#69db7c; font-weight:bold; border-bottom:1px solid #4a5472; padding-bottom:4px; margin-top:12px; margin-bottom:6px;">Incoming Requests</p>`;
+    if (!incoming.length) {
+      body += '<p style="color:#8a96b8; font-size:11px; margin-bottom:10px;">No pending incoming requests.</p>';
+    } else {
+      for (const r of incoming) {
+        body += `
+          <div class="listrow" style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
+            <span>${r.name}<br/><span class="sub" style="font-size:10px; color:#8a96b8;">${r.job} Lv.${r.level}</span></span>
+            <span>
+              <button class="btn" data-accept="${r.name}" style="margin-right:4px; background:#2b8a3e; border-color:#2b8a3e; color:#fff;">Accept</button>
+              <button class="btn" data-remove="${r.name}" style="background:#c92a2a; border-color:#c92a2a; color:#fff;">Decline</button>
+            </span>
+          </div>
+        `;
+      }
+    }
+
+    // 3. Outgoing
+    body += `<p style="color:#74c0fc; font-weight:bold; border-bottom:1px solid #4a5472; padding-bottom:4px; margin-top:12px; margin-bottom:6px;">Outgoing Requests</p>`;
+    if (!outgoing.length) {
+      body += '<p style="color:#8a96b8; font-size:11px; margin-bottom:6px;">No pending outgoing requests.</p>';
+    } else {
+      for (const r of outgoing) {
+        body += `
+          <div class="listrow" style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
+            <span>${r.name}<br/><span class="sub" style="font-size:10px; color:#8a96b8;">${r.job} Lv.${r.level}</span></span>
+            <span>
+              <button class="btn" data-remove="${r.name}" style="background:#c92a2a; border-color:#c92a2a; color:#fff;">Cancel</button>
+            </span>
+          </div>
+        `;
+      }
+    }
+
+    body += '</div>';
+
+    // Keep dialog open on click
+    showDialog('Friends List', body, [{ label: 'Close' }]);
+
+    // Add event listener to Send Request button
+    $('btn-add-friend').addEventListener('click', async () => {
+      const nameInput = $('add-friend-name');
+      const name = nameInput.value.trim();
+      if (!name) return;
+      try {
+        const res = await API.addFriend(name);
+        log(res.message || `Friend request sent to ${name}.`, 'sys');
+        openFriendsList(true); // refresh
+      } catch (err) {
+        log(`Failed to add friend: ${err.message}`, 'sys');
+      }
+    });
+
+    // Add event listeners to list rows buttons
+    $('dlg-body').addEventListener('click', async (e) => {
+      const tell = e.target.getAttribute('data-tell');
+      const accept = e.target.getAttribute('data-accept');
+      const remove = e.target.getAttribute('data-remove');
+
+      if (tell) {
+        closeDialog();
+        openChat();
+        $('chat-input').value = `/tell ${tell} `;
+      } else if (accept) {
+        try {
+          await API.acceptFriend(accept);
+          log(`Accepted friend request from ${accept}.`, 'sys');
+          openFriendsList(true);
+        } catch (err) {
+          log(`Failed to accept friend: ${err.message}`, 'sys');
+        }
+      } else if (remove) {
+        try {
+          await API.removeFriend(remove);
+          log(`Removed friend/request for ${remove}.`, 'sys');
+          openFriendsList(true);
+        } catch (err) {
+          log(`Failed to remove friend/request: ${err.message}`, 'sys');
+        }
+      }
+    }, { once: true });
+
+  } catch (err) {
+    log(`Failed to load friends list: ${err.message}`, 'sys');
+  }
+}
+
+export function refreshFriendsListIfOpen() {
+  if (S.uiOpen && $('dialog') && $('dialog').style.display !== 'none' && $('dlg-title').textContent === 'Friends List') {
+    openFriendsList(true);
+  }
 }
 
 export function openHelp() {

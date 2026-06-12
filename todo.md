@@ -27,7 +27,7 @@ This checklist outlines the progressive phases required to convert the single-pl
 
 ---
 
-## 💬 Phase 2: WebSockets & Spatial Chat
+## 💬 Phase 2: WebSockets & Spatial Chat ✅ DONE
 *Goal: Introduce real-time communication and chat filtering based on player coordinates.*
 
 - [x] **Set up Socket Server Infrastructure**
@@ -43,11 +43,11 @@ This checklist outlines the progressive phases required to convert the single-pl
   - Falls back to original offline local echo + NPC flavor responses when not connected.
   - Added CSS colors: `.shout` (golden-orange `#ffb347`), `.party-chat` (sky-blue `#74c0fc`).
   - Added `<span id="player-count">` in the minimap panel + `updatePlayerCount()` in UI.
-- [ ] **Friends List**
+- [x] **Friends List**
   - New table `friendships` (`account_id`, `friend_account_id`, `status`: pending/accepted) in `server/src/db.js`.
   - API routes: `POST /api/friends/request`, `POST /api/friends/accept`, `GET /api/friends` (returns friends + their online status by checking the server's active-socket directory).
   - Server tracks online accounts (from Phase 3's player directory) and pushes presence changes to friends over the socket.
-  - Client: a Friends panel in [ui.js](file:///home/ender/ffxi-browser/src/ui.js) listing friends with online/offline indicator; `/tell <name>` routes to a friend by character name globally (not just same-zone), looked up via the server's directory rather than spatial filtering.
+  - Client: a Friends panel in `ui.js` listing friends with online/offline indicator; `/tell <name>` routes to a friend by character name globally (not just same-zone), looked up via the server's directory rather than spatial filtering.
 
 ---
 

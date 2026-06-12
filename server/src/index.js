@@ -5,6 +5,7 @@ import cors from 'cors';
 import { Server as SocketServer } from 'socket.io';
 import { router as authRouter } from './auth.js';
 import { router as characterRouter } from './character.js';
+import { router as friendsRouter } from './friends.js';
 import { initChat } from './chat.js';
 
 const app = express();
@@ -17,6 +18,7 @@ app.use(express.json());
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRouter);
 app.use('/api/character', characterRouter);
+app.use('/api/friends', friendsRouter);
 
 // Attach Socket.IO to the same HTTP server
 const httpServer = createServer(app);

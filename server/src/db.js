@@ -37,4 +37,13 @@ db.exec(`
     pos_z           REAL,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS friendships (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    friend_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    status        TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(account_id, friend_id)
+  );
 `);

@@ -141,11 +141,30 @@ function startGame(charData, saved) {
         UI.updatePlayerCount(1);
       });
       Socket.on('chat:message', (msg) => {
-        const CHAN_CSS = { say: 'say', shout: 'shout', party: 'party-chat' };
-        const prefix = msg.channel === 'shout' ? '[Shout] ' : msg.channel === 'party' ? '[Party] ' : '';
-        UI.log(`${prefix}${msg.from} : ${msg.text}`, CHAN_CSS[msg.channel] || 'say');
+        const CHAN_CSS = { say: 'say', shout: 'shout', party: 'party-chat', tell: 'tell-chat', system: 'sys' };
+        let prefix = '';
+        if (msg.channel === 'shout') prefix = '[Shout] ';
+        else if (msg.channel === 'party') prefix = '[Party] ';
+        else if (msg.channel === 'tell') {
+          if (msg.from === S.charName) {
+            prefix = `>> ${msg.to} : `;
+          } else {
+            prefix = `${msg.from} >> : `;
+          }
+        }
+
+        if (msg.channel === 'tell') {
+          UI.log(`${prefix}${msg.text}`, CHAN_CSS[msg.channel]);
+        } else if (msg.channel === 'system') {
+          UI.log(msg.text, 'sys');
+        } else {
+          UI.log(`${prefix}${msg.from} : ${msg.text}`, CHAN_CSS[msg.channel] || 'say');
+        }
       });
       Socket.on('player:count', ({ count }) => UI.updatePlayerCount(count));
+      Socket.on('friends:update', () => {
+        UI.refreshFriendsListIfOpen();
+      });
       Socket.on('monsters:snapshot', (snapshot) => {
         MonsterPuppets.applySnapshot(snapshot);
       });

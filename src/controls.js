@@ -161,6 +161,7 @@ export function initControls(dom) {
     else if (e.code === 'KeyF') { S.firstPerson = !S.firstPerson; if (!S.firstPerson) S.camDist = Math.max(S.camDist, 6); }
     else if (e.code === 'KeyI') UI.openInventory();
     else if (e.code === 'KeyM') UI.openSpellbook();
+    else if (e.code === 'KeyO') UI.openFriendsList();
     else if (e.code === 'KeyH') UI.toggleHint();
     else if (e.shiftKey && e.code === 'Slash') UI.openHelp();
     else if (/^Digit\d$/.test(e.code)) {

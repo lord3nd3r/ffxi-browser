@@ -18,6 +18,43 @@ const trackedMonsters = new Map();
 
 // Authoritative Monsters Map
 const monsters = new Map();
+
+let ioInstance = null;
+
+export function isAccountOnline(accountId) {
+  if (!ioInstance) return false;
+  for (const [socketId, socket] of ioInstance.sockets.sockets) {
+    if (socket.accountId === accountId && players.has(socketId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function notifyFriendsUpdate(accountId) {
+  if (!ioInstance) return;
+  for (const [socketId, socket] of ioInstance.sockets.sockets) {
+    if (socket.accountId === accountId) {
+      socket.emit('friends:update');
+    }
+  }
+}
+
+export function notifyOnlineFriendsOfStatusChange(accountId) {
+  try {
+    const friends = db.prepare(`
+      SELECT CASE WHEN account_id = ? THEN friend_id ELSE account_id END as friend_id
+      FROM friendships
+      WHERE (account_id = ? OR friend_id = ?) AND status = 'accepted'
+    `).all(accountId, accountId, accountId);
+
+    for (const f of friends) {
+      notifyFriendsUpdate(f.friend_id);
+    }
+  } catch (e) {
+    console.error('[db] failed to query friends for status change:', e.message);
+  }
+}
 let monsterNextId = 1;
 
 // Authoritative Gathering Nodes Map
@@ -506,6 +543,7 @@ function resolveAction(p, actionId, targetId, socket, io) {
  * @param {import('socket.io').Server} io
  */
 export function initChat(io) {
+  ioInstance = io;
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Missing auth token'));
@@ -601,6 +639,7 @@ export function initChat(io) {
       players.set(socket.id, p);
       broadcastCount(io);
       sendPlayerStatus(socket, p);
+      notifyOnlineFriendsOfStatusChange(socket.accountId);
       console.log(`[ws] ${charName} entered at (${p.x|0}, ${p.z|0}) — ${players.size} online`);
     });
 
@@ -946,6 +985,46 @@ export function initChat(io) {
       });
     });
 
+    socket.on('chat:tell', ({ targetName, text }) => {
+      const sender = players.get(socket.id);
+      if (!sender || typeof targetName !== 'string' || typeof text !== 'string' || !text.trim()) return;
+
+      const cleanedTarget = targetName.trim();
+      const cleanedText = text.trim().slice(0, 200);
+
+      // Find socket of target player
+      let targetSocket = null;
+      let targetPlayer = null;
+      for (const [sid, p] of players) {
+        if (p.charName.toLowerCase() === cleanedTarget.toLowerCase()) {
+          targetSocket = ioInstance.sockets.sockets.get(sid);
+          targetPlayer = p;
+          break;
+        }
+      }
+
+      if (targetSocket && targetPlayer) {
+        const msg = {
+          from: sender.charName,
+          to: targetPlayer.charName,
+          text: cleanedText,
+          channel: 'tell',
+          timestamp: Date.now(),
+        };
+        targetSocket.emit('chat:message', msg);
+        // Also echo back to the sender
+        socket.emit('chat:message', msg);
+      } else {
+        // Send system message back to sender that target is offline
+        socket.emit('chat:message', {
+          from: 'System',
+          text: `${cleanedTarget} is not online.`,
+          channel: 'system',
+          timestamp: Date.now(),
+        });
+      }
+    });
+
     // ── disconnect ───────────────────────────────────────────────────
     socket.on('disconnect', (reason) => {
       const entry = players.get(socket.id);
@@ -957,6 +1036,7 @@ export function initChat(io) {
       trackedMonsters.delete(socket.id);
       broadcastCount(io);
       io.emit('player:left', { id: socket.id });
+      notifyOnlineFriendsOfStatusChange(socket.accountId);
       console.log(`[ws] disconnected: ${entry?.charName || socket.username} (${reason}) — ${players.size} online`);
     });
   });

@@ -112,3 +112,7 @@ export function startPositionUpdates(getPos) {
 export function sendChat(channel, text) {
   emit(`chat:${channel}`, { text });
 }
+
+export function sendTell(targetName, text) {
+  emit('chat:tell', { targetName, text });
+}
