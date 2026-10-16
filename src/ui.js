@@ -2,6 +2,7 @@
 // crafting/jobs), floating combat text, character creation.
 import * as THREE from 'three';
 import { S, clamp } from './state.js';
+import { minimapBounds } from './zones.js';
 import { JOBS, ACTIONS, ITEMS, QUESTS, RECIPES, VENDOR_STOCK, expToNext, MAX_LEVEL } from './data.js';
 import {
   G, hotbarList, useHotbarSlot, countItem, questFor, acceptQuest, questComplete, rewardQuest,
@@ -397,20 +398,29 @@ export function hideCastbar() { $('castbar').style.display = 'none'; }
 const mmCtx = () => $('minimap').getContext('2d');
 export function updateMinimap() {
   const cx = mmCtx();
-  const W = 140, scale = W / 190;
-  const px = (x) => (x + 95) * scale, pz = (z) => (z + 95) * scale;
-  cx.fillStyle = '#243a1e'; cx.fillRect(0, 0, W, W);
-  // zones
-  cx.fillStyle = '#3a5a2e'; cx.beginPath(); cx.arc(px(55), pz(48), 26 * scale, 0, 7); cx.fill();   // forest
-  cx.fillStyle = '#4a4a44'; cx.beginPath(); cx.arc(px(-70), pz(-68), 16 * scale, 0, 7); cx.fill(); // ruins
-  cx.fillStyle = '#2e4a6a'; cx.beginPath(); cx.arc(px(44), pz(-34), 11 * scale, 0, 7); cx.fill();  // pond
-  // coast (NW edge): sand strip + ocean
-  cx.fillStyle = '#cbb88c'; cx.fillRect(0, pz(58), px(28), pz(95) - pz(58));
-  cx.fillStyle = '#3a6a9a'; cx.fillRect(0, pz(80), px(28), pz(95) - pz(80));
-  cx.fillStyle = '#6a5a3e'; cx.beginPath(); cx.arc(px(0), pz(0), 20 * scale, 0, 7); cx.fill();     // town
-  // road
-  cx.strokeStyle = '#6a5a3e'; cx.lineWidth = 2;
-  cx.beginPath(); cx.moveTo(px(0), pz(0)); cx.lineTo(px(-70), pz(-68)); cx.stroke();
+  const W = 140;
+  const b = minimapBounds();
+  const scale = W / (b.maxX - b.minX);
+  const px = (x) => (x - b.minX) * scale, pz = (z) => (z - b.minZ) * scale;
+  const zone = S.zone || 'sanria';
+  cx.fillStyle = zone === 'horutoto' ? '#2a241c' : (zone === 'sanria' ? '#4a4034' : '#243a1e');
+  cx.fillRect(0, 0, W, W);
+  if (zone === 'sarutaria') {
+    cx.fillStyle = '#3a5a2e'; cx.beginPath(); cx.arc(px(55), pz(48), 26 * scale, 0, 7); cx.fill();
+    cx.fillStyle = '#4a4a44'; cx.beginPath(); cx.arc(px(-70), pz(-68), 16 * scale, 0, 7); cx.fill();
+    cx.fillStyle = '#2e4a6a'; cx.beginPath(); cx.arc(px(44), pz(-34), 11 * scale, 0, 7); cx.fill();
+    cx.fillStyle = '#cbb88c'; cx.fillRect(0, pz(58), Math.max(0, px(28)), Math.max(0, pz(95) - pz(58)));
+    cx.fillStyle = '#3a6a9a'; cx.fillRect(0, pz(80), Math.max(0, px(28)), Math.max(0, pz(95) - pz(80)));
+    cx.strokeStyle = '#6a5a3e'; cx.lineWidth = 2;
+    cx.beginPath(); cx.moveTo(px(0), pz(0)); cx.lineTo(px(-70), pz(-68)); cx.stroke();
+    cx.fillStyle = '#8d7a58'; cx.fillRect(px(-4), pz(32), Math.max(2, (8) * scale), Math.max(2, 6 * scale));
+  } else if (zone === 'sanria') {
+    cx.strokeStyle = '#cbb892'; cx.lineWidth = 2;
+    cx.strokeRect(px(-21), pz(-18), 42 * scale, 43 * scale);
+    cx.fillStyle = '#6a8ea8'; cx.fillRect(px(-4), pz(24), 8 * scale, 4 * scale);
+  } else {
+    cx.fillStyle = '#3a342c'; cx.fillRect(px(494), pz(500), 12 * scale, 52 * scale);
+  }
 
   for (const n of S.npcs) { cx.fillStyle = '#ffe066'; cx.fillRect(px(n.pos.x) - 1.5, pz(n.pos.z) - 1.5, 3, 3); }
   for (const nd of S.nodes) if (nd.available) { cx.fillStyle = '#4dd2ff'; cx.fillRect(px(nd.x) - 1, pz(nd.z) - 1, 2, 2); }
@@ -489,12 +499,12 @@ export function closeDialog() { $('dialog').style.display = 'none'; $('dlg-body'
 
 // ---------- NPC conversation ----------
 const FLAVOR = {
-  eustace: 'Halt! …Ah, an adventurer. Good. The plains have grown dangerous of late.',
-  mirelle: 'Sharp steel for sharp minds. See anything you like?',
-  tarutaru: 'Welcome, welcome-welcome! Pikko-Wikko has potions galore, yes-yes!',
-  father_odo: 'May the Goddess watch over you, child.',
-  galdric: 'Mind the sawdust. A carpenter\'s work is never done.',
-  scholar: 'Careful where you step! These stones predate the town by a thousand years.',
+  eustace: 'Halt! …Ah, an adventurer. I keep the north gate of Port Sanria. West Sarutaria has grown dangerous of late.',
+  mirelle: 'Mirelle\'s armory, such as it is. Sharp steel for sharp minds — see anything you like?',
+  tarutaru: 'Welcome, welcome-welcome! Pikko-Wikko minds the goods counter, yes-yes! Potions, ethers, all the little bottles!',
+  father_odo: 'May the Goddess watch over you, child. The chapel is quiet. The crypt under the ruins is not.',
+  galdric: 'Mind the sawdust. If you need maple, the eastern woods of Sarutaria still have standing timber.',
+  scholar: 'Careful where you step! These stones predate Port Sanria by a thousand years. The violet light on the altar leads down.',
 };
 
 const ALLY_FLAVOR = {
@@ -549,7 +559,7 @@ export function openNpcDialog(npc) {
   if (npc.npc.role === 'items') opts.push({ label: 'Browse Wares', fn: () => openShop('items') });
   if (id === 'father_odo') opts.push({ label: 'Receive Blessing (free heal)', fn: () => npcBless() });
   if (id === 'eustace') opts.push({ label: 'Where should I hunt?', keep: true, fn: () => {
-    $('dlg-body').innerHTML = '<p><i>Hares and wasps roam just outside the gate — fine prey for a fresh adventurer. Mandragoras lurk in the eastern woods. The goblin camps southwest are for seasoned fighters, and past them… orcs. Stay clear of the old ruins until you\'re strong, friend.</i></p>';
+    $('dlg-body').innerHTML = '<p><i>Take the north gate into West Sarutaria. Mad sheep and wasps on the south plains are fair game for a new adventurer. Mandragoras and bats haunt the eastern woods. Goblins camp to the southwest, orcs beyond them. A violet light on the ruin altar opens Inner Horutoto — leave the Render alone until you are strong.</i></p>';
   }});
   opts.push({ label: 'Farewell' });
   showDialog(npc.name, body, opts);

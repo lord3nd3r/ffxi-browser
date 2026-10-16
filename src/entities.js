@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { S, rand, irand } from './state.js';
 import { MONSTERS } from './data.js';
+import { painterlyStandard, attachBlob } from './look.js';
 
 // ---------- rigged character models (Quaternius Universal rig, realistic proportions) ----------
 // Outfits + base bodies share one skeleton; the Universal Animation Library drives them all.
@@ -214,9 +215,11 @@ export function makeCharacterModel(name, { scale = 0.9, appearance = null } = {}
       o.castShadow = true;
       o.receiveShadow = true;
       o.frustumCulled = false;          // skinned bounds are unreliable mid-anim
+      if (o.material) painterlyStandard(o.material);
     }
     if (hideSet.has(o.name)) o.visible = false;
   });
+  attachCape(rig, boneByName, (appearance && appearance.cape) || CAPE_OF[name] || 0x6a3a3a);
 
   const mixer = new THREE.AnimationMixer(rig);
   const anims = {};
@@ -235,7 +238,34 @@ export function makeCharacterModel(name, { scale = 0.9, appearance = null } = {}
   }
 
   const parts = { body: rig, hand };
+  attachBlob(rig, 0.62);
   return { group: rig, mixer, anims, parts };
+}
+
+const CAPE_OF = {
+  Knight: 0x8d2e2e,
+  Barbarian: 0xc47a32,
+  Mage: 0xf4f0e4,
+  Rogue_Hooded: 0x2a2144,
+  Rogue: 0x3f4c30,
+};
+
+function attachCape(rig, boneByName, color) {
+  const bone = boneByName.spine_02 || boneByName.spine_01 || boneByName.Spine_02 || boneByName.chest || boneByName.spine;
+  if (!bone) return;
+  const geo = new THREE.PlaneGeometry(0.46, 0.62, 1, 4);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    pos.setZ(i, -0.05 - (0.31 - y) * 0.22);
+  }
+  const mat = painterlyStandard(new THREE.MeshStandardMaterial({ color, roughness: 0.88, side: THREE.DoubleSide }));
+  const cape = new THREE.Mesh(geo, mat);
+  cape.position.set(0, 0.12, -0.14);
+  cape.castShadow = true;
+  rig.add(cape);
+  rig.updateMatrixWorld(true);
+  bone.attach(cape);
 }
 
 // loop-animation state machine helpers
@@ -278,37 +308,47 @@ export function playOnce(e, name, fade = 0.12, lock = true) {
 const matCache = new Map();
 function mat(color, opts = {}) {
   const key = color + JSON.stringify(opts);
-  if (!matCache.has(key)) matCache.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.8, flatShading: false, ...opts }));
+  if (!matCache.has(key)) {
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0, flatShading: false, ...opts });
+    painterlyStandard(m);
+    matCache.set(key, m);
+  }
   return matCache.get(key);
 }
 
 // ---------- nameplate sprite ----------
 export function makeNameplate(text, color = '#ffffff', sub = '', disc = false) {
   const cv = document.createElement('canvas');
-  cv.width = 256; cv.height = 80;
+  cv.width = 512; cv.height = 128;
   const cx = cv.getContext('2d');
-  let ty = 36;
+  const draw = (str, y, fill, size) => {
+    cx.font = `bold ${size}px Verdana, Tahoma, sans-serif`;
+    cx.textAlign = 'center';
+    cx.lineWidth = 6;
+    cx.strokeStyle = 'rgba(0,0,0,0.92)';
+    cx.strokeText(str, 256, y);
+    cx.fillStyle = fill;
+    cx.fillText(str, 256, y);
+  };
+  let ty = 64;
   if (disc) {
     // FFXI party-member disc: gold orb above the name
-    const g = cx.createRadialGradient(124, 12, 2, 128, 16, 13);
-    g.addColorStop(0, '#fff3c4');
-    g.addColorStop(0.5, '#f5c842');
-    g.addColorStop(1, '#9a6a14');
+    const g = cx.createRadialGradient(248, 22, 3, 256, 28, 22);
+    g.addColorStop(0, '#fff6d0');
+    g.addColorStop(0.45, '#f0c43a');
+    g.addColorStop(1, '#8a5a10');
     cx.fillStyle = g;
-    cx.beginPath(); cx.arc(128, 16, 12, 0, 7); cx.fill();
-    cx.strokeStyle = '#4a3608'; cx.lineWidth = 2;
-    cx.beginPath(); cx.arc(128, 16, 12, 0, 7); cx.stroke();
-    ty = 54;
+    cx.beginPath(); cx.arc(256, 28, 18, 0, 7); cx.fill();
+    cx.strokeStyle = '#3a2a08'; cx.lineWidth = 3;
+    cx.beginPath(); cx.arc(256, 28, 18, 0, 7); cx.stroke();
+    ty = 96;
   }
-  cx.font = 'bold 22px Verdana';
-  cx.textAlign = 'center';
-  cx.shadowColor = '#000'; cx.shadowBlur = 5;
-  cx.fillStyle = color;
-  cx.fillText(text.slice(0, 22), 128, ty);
-  if (sub) { cx.font = '15px Verdana'; cx.fillStyle = '#ffd43b'; cx.fillText(sub, 128, ty + 22); }
+  draw(text.slice(0, 22), ty, color, 40);
+  if (sub) draw(sub, ty + 36, '#ffe08a', 26);
   const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sp.scale.set(3.2, 1.0, 1);
+  sp.scale.set(3.2, 0.8, 1);
   sp.renderOrder = 10;
   return sp;
 }
@@ -320,17 +360,25 @@ export function makeWeapon(kind) {
   const cyl = (rt, rb, h, m, seg = 7) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m); o.castShadow = true; return o; };
   const sph = (r, m) => { const o = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 8), m); o.castShadow = true; return o; };
   
+  const steel = mat(0xd5d8e0, { metalness: 0.35, roughness: 0.42 });
+  const gold = mat(0xd4b15a, { metalness: 0.4, roughness: 0.38 });
   if (kind === 'sword') {
-    const blade = box(0.09, 0.95, 0.03, mat(0xc8ccd4, { metalness: 0.7, roughness: 0.3 }));
+    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.045, 0.95, 4), steel);
+    blade.scale.z = 0.28;
     blade.position.y = 0.62;
-    const guard = box(0.26, 0.05, 0.06, mat(0xc9a227, { metalness: 0.6 }));
+    blade.castShadow = true;
+    const guard = box(0.28, 0.045, 0.07, gold);
     guard.position.y = 0.14;
-    const grip = cyl(0.035, 0.035, 0.24, mat(0x4a2f1d));
-    g.add(blade, guard, grip);
+    const grip = cyl(0.032, 0.036, 0.26, mat(0x4a2f1d));
+    const pom = sph(0.045, gold);
+    pom.position.y = -0.14;
+    g.add(blade, guard, grip, pom);
   } else if (kind === 'dagger') {
-    const blade = box(0.07, 0.5, 0.025, mat(0xc8ccd4, { metalness: 0.7, roughness: 0.3 }));
-    blade.position.y = 0.38;
-    const grip = cyl(0.03, 0.03, 0.2, mat(0x333));
+    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.03, 0.48, 4), steel);
+    blade.scale.z = 0.3;
+    blade.position.y = 0.36;
+    blade.castShadow = true;
+    const grip = cyl(0.028, 0.03, 0.2, mat(0x2c241c));
     g.add(blade, grip);
   } else if (kind === 'club') {
     const head = cyl(0.12, 0.07, 0.45, mat(0x8a6a3f));
@@ -376,9 +424,12 @@ export function makeMonsterMesh(family) {
         o.castShadow = true;
         o.receiveShadow = true;
         o.frustumCulled = false;
+        if (o.material) painterlyStandard(o.material);
       }
     });
-    
+    const blobR = { sheep: 0.55, bee: 0.38, boss: 1.35, spider: 0.6, bat: 0.4 }[family] || 0.6;
+    attachBlob(rig, blobR);
+
     return { group: rig, mixer, anims, parts: { bob: rig } };
   }
   
@@ -593,8 +644,9 @@ export function makeMonsterMesh(family) {
     armR.position.set(0, 0.7, -0.34);
     armR.rotation.z = -0.3;
     
-    const bag = box(0.2, 0.35, 0.32, mat(0x4d3324));
-    bag.position.set(-0.24, 0.65, 0);
+    const bag = sph(0.22, mat(0x4d3324));
+    bag.scale.set(0.9, 1.15, 0.85);
+    bag.position.set(-0.28, 0.62, 0);
     
     g.add(body, hood, mask, eyeL, eyeR, earL, earR, armL, armR, bag);
     parts.bob = g;
@@ -673,8 +725,11 @@ export function makeMonsterMesh(family) {
     if (o.isMesh) {
       o.castShadow = true;
       o.receiveShadow = true;
+      if (o.material) painterlyStandard(o.material);
     }
   });
+  const blobR = { hare: 0.42, sheep: 0.5, mandra: 0.4, worm: 0.38, goblin: 0.5, bee: 0.36, orc: 0.7, boss: 1.15 }[family] || 0.5;
+  attachBlob(g, blobR);
 
   return { group: g, parts };
 }

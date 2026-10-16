@@ -5,6 +5,11 @@ import puppeteer from 'puppeteer-core';
 const URL = process.env.GAME_URL || 'http://localhost:4399/';
 const shot = (p, n) => p.screenshot({ path: `/tmp/game-${n}.png` });
 
+async function goZone(id, x, z) {
+  await page.evaluate((id, x, z) => window.__zones.changeZone(id, x, z), id, x, z);
+  await new Promise(r => setTimeout(r, 1200));
+}
+
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome',
   headless: 'new',
@@ -80,6 +85,9 @@ const tgt = await page.evaluate(() => ({
 }));
 console.log('tab target:', JSON.stringify(tgt));
 
+// City has no monsters. West Sarutaria is the hunting zone.
+await goZone('sarutaria', 8, -30);
+
 // teleport next to the nearest hare (swiftshader is too slow to walk there) and fight
 await page.evaluate(() => {
   const S = window.__S;
@@ -112,7 +120,10 @@ await new Promise(r => setTimeout(r, 1000));
 const questResult = await page.evaluate(async () => {
   const S = window.__S, g = window.__game;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const zoneTo = async (id, x, z) => { window.__zones.changeZone(id, x, z); await sleep(1200); };
+  await zoneTo('sanria', 5, 18);
   const eustace = S.npcs.find(n => n.npc.id === 'eustace');
+  if (!eustace) return { error: 'eustace missing', zone: S.zone };
   S.player.mesh.position.set(eustace.pos.x + 1, 0, eustace.pos.z + 1);
   g.requestInteract(eustace);
   await sleep(600);
@@ -121,13 +132,15 @@ const questResult = await page.evaluate(async () => {
   if (accept) accept.click();
   await sleep(300);
   const questActive = S.quests.q_hares && S.quests.q_hares.state === 'active';
-  // slay 4 hares
+  await zoneTo('sarutaria', 8, -30);
   const hares = S.monsters.filter(m => m.typeId === 'hare' && m.alive).slice(0, 4);
   for (const h of hares) g.applyDamage(h, 99999, S.player);
   await sleep(300);
   const progress = S.quests.q_hares.n;
   const gilBefore = S.gil;
-  g.requestInteract(eustace);
+  await zoneTo('sanria', 5, 18);
+  const eustaceBack = S.npcs.find(n => n.npc.id === 'eustace');
+  g.requestInteract(eustaceBack);
   await sleep(600);
   const claim = [...document.querySelectorAll('#dlg-opts .btn')].find(b => b.textContent.includes('Claim'));
   if (claim) claim.click();
@@ -140,6 +153,8 @@ console.log('quest flow:', JSON.stringify(questResult));
 const sysResult = await page.evaluate(async () => {
   const S = window.__S, g = window.__game;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  window.__zones.changeZone('sarutaria', 20, -28);
+  await sleep(1200);
   // gather a herb node
   const node = S.nodes.find(n => n.type === 'herb');
   S.player.mesh.position.set(node.x + 1, 0, node.z + 1);
