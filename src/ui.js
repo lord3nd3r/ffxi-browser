@@ -906,6 +906,7 @@ export function openHelp() {
     <p style="margin-top:6px"><b>Progression</b> — Earn EXP, learn abilities as you level, buy gear in town, gather <span style="color:#4dd2ff">✦ glowing nodes</span> (logs, ore, herbs) and craft at the crystal. Change jobs at the crystal — each job levels separately!</p>
     <p style="margin-top:6px"><b>Quests</b> — NPCs with work for you are in town. Start with Gate Guard Eustace at the north gate. <b>I</b> opens inventory.</p>
     <p style="margin-top:6px"><b>HUD</b> — Drag any panel (minimap, party, stats, chat, hotbar) to rearrange the interface. Your layout is saved.</p>
+    <p style="margin-top:6px"><b>Graphics</b> — The button at the top left cycles Low, Medium, and High, then reloads. Low is the default: no bloom, no shadow map, matte lighting. Pick it if the game stutters.</p>
   `, [{ label: 'Adventure awaits!' }, { label: 'Reset UI Layout', fn: resetLayout }]);
 }
 

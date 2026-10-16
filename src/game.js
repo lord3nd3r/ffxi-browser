@@ -305,7 +305,7 @@ function buildNodes() {
       mesh = new THREE.Group();
       mesh.add(env('stump_A', 4)); // simplified fallback check
     } else if (type === 'mining') {
-      mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshStandardMaterial({ color: 0xb87333, flatShading: true, metalness: 0.5, roughness: 0.5 }));
+      mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshLambertMaterial({ color: 0x9a7b58, flatShading: true }));
       mesh.position.y = 0.4; mesh.castShadow = true;
       const g = new THREE.Group(); g.add(mesh); mesh = g;
     } else {

@@ -1,47 +1,40 @@
-// World: heightfield terrain with real PBR texture splatting (ambientCG CC0),
-// reflective ocean (three.js Water), photoscanned rocks (Poly Haven CC0),
-// painterly card-foliage trees and plaster/timber/rooftile architecture —
-// the same simple-geometry + rich-texture approach FFXI's own zones use.
+// World: painted tile textures on a coarse heightfield, matte Lambert materials,
+// card foliage, and low-poly rocks. The expensive photo PBR set, reflective
+// water shader, and scanned boulders were the frame-time cost.
 import * as THREE from 'three';
 import { S, clamp, lerp, rand } from './state.js';
 import * as TEX from './textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { Water } from 'three/addons/objects/Water.js';
-import { painterlyStandard, attachWind, updateBlobs, windUniform } from './look.js';
-
-// ---------- photoscanned models (Poly Haven CC0) ----------
-const WM = {};
-const REAL_FILES = {
-  boulder: 'real/boulder_01/boulder_01_1k.gltf',
-  rockset: 'real/rock_moss_set_01/rock_moss_set_01_1k.gltf',
-};
+import { attachWind, updateBlobs, windUniform } from './look.js';
+import { quality } from './quality.js';
 
 export function preloadWorldModels(onProgress) {
-  const loader = new GLTFLoader();
-  const names = Object.keys(REAL_FILES);
-  let done = 0;
-  return Promise.all(names.map(n => new Promise((resolve, reject) => {
-    loader.load(`models/${REAL_FILES[n]}`, (gltf) => {
-      WM[n] = gltf.scene;
-      done++;
-      if (onProgress) onProgress(done, names.length);
-      resolve();
-    }, undefined, reject);
-  })));
+  if (onProgress) onProgress(1, 1);
+  return Promise.resolve();
 }
 
 export function env(name, scale = 1) {
   if (name.startsWith('stump')) return makeStump(scale * 0.22);
-  const o = WM[name].clone(true);
-  o.scale.setScalar(scale);
-  o.traverse(m => {
-    if (m.isMesh) {
-      m.castShadow = true; m.receiveShadow = true;
-      if (m.material) painterlyStandard(m.material);
-    }
-  });
-  return o;
+  return makePaintedRock(scale);
+}
+
+function makePaintedRock(scale) {
+  const geo = new THREE.IcosahedronGeometry(1, 1);
+  geo.userData.owned = true;
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const n = 0.82 + hash(i * 3 + 1, i * 5 + 2) * 0.18;
+    cols[i * 3] = n;
+    cols[i * 3 + 1] = n * 0.97;
+    cols[i * 3 + 2] = n * 0.9;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const m = new THREE.Mesh(geo, M.rock);
+  m.castShadow = m.receiveShadow = quality().shadows;
+  m.scale.set(scale * rand(1.05, 1.5), scale * rand(0.5, 0.8), scale * rand(0.95, 1.4));
+  m.rotation.set(rand(-0.15, 0.15), rand(0, 6), rand(-0.15, 0.15));
+  return m;
 }
 
 // ---------- deterministic value noise ----------
@@ -186,40 +179,47 @@ function mesh(geo, mat, x = 0, y = 0, z = 0) {
   geo.userData.owned = true;
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
-  m.castShadow = m.receiveShadow = true;
+  const sh = quality().shadows;
+  m.castShadow = m.receiveShadow = sh;
   return m;
 }
 
 function initMaterials() {
-  // lifelike PBR: full color + normal maps on every built surface
-  const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, ...o });
+  // Matte Lambert. The painted maps are the color; a multiply tint would hide them.
+  const lambert = (o) => new THREE.MeshLambertMaterial({ color: 0xffffff, ...o });
   M = {
-    plaster: std({ map: TEX.pbr('plaster'), normalMap: TEX.pbrN('plaster_n'), color: 0xefe6cf }),
-    planks:  std({ map: TEX.pbr('planks'),  normalMap: TEX.pbrN('planks_n') }),
-    roof:    std({ map: TEX.pbr('roof'),    normalMap: TEX.pbrN('roof_n'), roughness: 0.85 }),
-    bricks:  std({ map: TEX.pbr('bricks'),  normalMap: TEX.pbrN('bricks_n'), color: 0xd8ccb6, roughness: 0.96 }),
-    paving:  std({ map: TEX.pbr('paving'),  normalMap: TEX.pbrN('paving_n') }),
-    bark:    std({ map: TEX.pbr('bark', 1, 2), normalMap: TEX.pbrN('bark_n', 1, 2) }),
+    plaster: lambert({ map: TEX.pbr('plaster') }),
+    planks:  lambert({ map: TEX.pbr('planks') }),
+    roof:    lambert({ map: TEX.pbr('roof') }),
+    bricks:  lambert({ map: TEX.pbr('bricks') }),
+    paving:  lambert({ map: TEX.pbr('paving') }),
+    bark:    lambert({ map: TEX.pbr('bark') }),
+    rock:    lambert({ map: TEX.pbr('rock'), vertexColors: true }),
+    water:   lambert({ map: TEX.pbr('water', 12, 6) }),
   };
-  painterlyStandard([M.plaster, M.planks, M.roof, M.bricks, M.paving, M.bark]);
-  // painterly foliage cards; custom depth materials give correct leaf shadows
-  const card = (tex, tint) => {
-    const m = new THREE.MeshStandardMaterial({ map: tex, color: tint, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.96 });
-    m.userData.depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.4 });
+  const card = (tex) => {
+    const m = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.35, side: THREE.DoubleSide });
     attachWind(m);
-    painterlyStandard(m);
     return m;
   };
-  M.leaf = card(TEX.foliageSprite(), 0xc5d48a);
-  M.pine = card(TEX.pineSprite(), 0x8eae78);
-  M.frond = card(TEX.frondSprite(), 0xb7c878);
+  M.leaf = card(TEX.foliageSprite());
+  M.pine = card(TEX.pineSprite());
+  M.frond = card(TEX.frondSprite());
 }
 
 function leafCard(mat, w, h) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
-  m.castShadow = true;
-  m.customDepthMaterial = mat.userData.depth;
+  m.castShadow = false;
+  m.receiveShadow = quality().shadows;
   return m;
+}
+
+function lampLight(parent, y, color, intensity, dist) {
+  if (!quality().pointLights) return null;
+  const light = new THREE.PointLight(color, intensity, dist, 2);
+  light.position.y = y;
+  parent.add(light);
+  return light;
 }
 
 // ---------- trees: bark trunk + painterly alpha cards (FFXI technique) ----------
@@ -232,8 +232,8 @@ function makeBroadleaf(s) {
   branch.rotation.z = -0.7;
   g.add(branch);
   const cy = trunkH + 0.55 * s;
-  for (let i = 0; i < 8; i++) {
-    const c = leafCard(M.leaf, rand(2.0, 2.9) * s, rand(1.8, 2.6) * s);
+  for (let i = 0; i < 4; i++) {
+    const c = leafCard(M.leaf, rand(2.2, 3.1) * s, rand(1.9, 2.7) * s);
     c.position.set(rand(-0.7, 0.7) * s, cy + rand(-0.45, 0.6) * s, rand(-0.7, 0.7) * s);
     c.rotation.set(rand(-0.35, 0.35), rand(0, Math.PI), rand(-0.35, 0.35));
     g.add(c);
@@ -252,7 +252,7 @@ function makePine(s) {
   for (let t = 0; t < 4; t++) {
     const w = (2.5 - t * 0.52) * s, h = (1.6 - t * 0.18) * s;
     const y = (1.15 + t * 0.78) * s + h / 2;
-    for (const ry of [0, Math.PI / 2, Math.PI / 4]) {
+    for (const ry of [0, Math.PI / 2]) {
       const c = leafCard(M.pine, w, h);
       c.position.y = y;
       c.rotation.y = ry + rand(-0.2, 0.2);
@@ -280,17 +280,18 @@ export function initWorld() {
   scene.fog = new THREE.Fog(0xd7e6df, 42, 158);
 
   // ---------- lights: warm key, cool sky, ochre ground (painted, not HDR) ----------
-  hemi = new THREE.HemisphereLight(0xc5daf0, 0x8a7450, 0.72);
+  hemi = new THREE.HemisphereLight(0xc5daf0, 0x8a7450, 0.85);
   scene.add(hemi);
-  ambient = new THREE.AmbientLight(0xfff3e2, 0.28);
+  ambient = new THREE.AmbientLight(0xfff3e2, 0.42);
   scene.add(ambient);
-  sun = new THREE.DirectionalLight(0xfff1d4, 1.45);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun = new THREE.DirectionalLight(0xfff1d4, 1.15);
+  const q = quality();
+  sun.castShadow = q.shadows;
+  sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
   sun.shadow.camera.left = -26; sun.shadow.camera.right = 26;
   sun.shadow.camera.top = 26; sun.shadow.camera.bottom = -26;
   sun.shadow.camera.near = 2; sun.shadow.camera.far = 90;
-  sun.shadow.bias = -0.0004;
+  sun.shadow.bias = -0.002;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
 
@@ -340,7 +341,7 @@ export function initWorld() {
 
 function buildField() {
   // ---------- terrain: 4-way PBR texture splat (grass / dirt / sand / stone) ----------
-  const size = S.worldSize, segs = 220;
+  const size = S.worldSize, segs = quality().terrainSegs;
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -374,12 +375,12 @@ function buildField() {
     splat.push(wGrass, wDirt, wSand, wStone);
 
     // vertex color is a subtle tint over the textures
-    let r = 0.9 + (noise2(x * 0.09 + 50, z * 0.09) - 0.5) * 0.22;
+    let r = 0.97 + (noise2(x * 0.09 + 50, z * 0.09) - 0.5) * 0.06;
     let cr = r, cg = r, cb = r;
     const dF = Math.hypot(x - 55, z - 48);                       // NE woods: somber gray-brown floor (ss-1)
     if (dF < 34) {
       const f = 1 - THREE.MathUtils.smoothstep(dF, 18, 34);
-      cr *= 1 - 0.3 * f; cg *= 1 - 0.28 * f; cb *= 1 - 0.26 * f;
+      cr *= 1 - 0.16 * f; cg *= 1 - 0.14 * f; cb *= 1 - 0.12 * f;
     }
     colors.push(cr, cg, cb);
   }
@@ -388,7 +389,7 @@ function buildField() {
   geo.computeVertexNormals();
 
   const tGrass = TEX.pbr('grass'), tDirt = TEX.pbr('dirt'), tSand = TEX.pbr('sand'), tStone = TEX.pbr('paving');
-  const tMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
+  const tMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   tMat.onBeforeCompile = (sh) => {
     sh.uniforms.tGrass = { value: tGrass };
     sh.uniforms.tDirt = { value: tDirt };
@@ -402,29 +403,18 @@ function buildField() {
       .replace('#include <color_fragment>', `#include <color_fragment>
 {
   vec4 w = vSplat / max(vSplat.x + vSplat.y + vSplat.z + vSplat.w, 1e-4);
-  // dual-scale sampling kills visible tiling: fine detail blended with a broad pass
-  vec2 uvA = vXZ * 0.11;
-  vec2 uvB = vXZ * 0.034;
-  vec3 gr = mix(texture2D(tGrass, uvA).rgb, texture2D(tGrass, uvB).rgb, 0.5);
-  vec3 di = mix(texture2D(tDirt, uvA * 1.05).rgb, texture2D(tDirt, uvB).rgb, 0.42);
-  vec3 sa = mix(texture2D(tSand, uvA).rgb, texture2D(tSand, uvB).rgb, 0.45);
-  vec3 st = mix(texture2D(tStone, vXZ * 0.16).rgb, texture2D(tStone, uvB).rgb, 0.35);
-  vec3 ter = gr * vec3(0.84, 1.16, 0.62) * w.x
-           + di * vec3(1.08, 0.92, 0.7) * w.y
-           + sa * vec3(1.2, 1.08, 0.84) * w.z
-           + st * vec3(0.9, 0.92, 0.96) * w.w;
-  float lum = dot(ter, vec3(0.3, 0.5, 0.2));
-  ter = mix(vec3(lum), ter, 0.8);
-  float patch = fract(sin(dot(floor(vXZ * 0.07), vec2(127.1, 311.7))) * 43758.5453);
-  ter *= 0.9 + patch * 0.16;
-  diffuseColor.rgb *= ter * 1.22;
+  vec2 uv = vXZ * 0.09;
+  vec3 ter = texture2D(tGrass, uv).rgb * w.x
+           + texture2D(tDirt, uv).rgb * w.y
+           + texture2D(tSand, uv).rgb * w.z
+           + texture2D(tStone, uv).rgb * w.w;
+  diffuseColor.rgb *= ter;
 }`);
   };
   geo.userData.owned = true;
-  tMat.userData.shaderKey = 'vana-terrain-splat-v1';
-  painterlyStandard(tMat);
   const terrain = new THREE.Mesh(geo, tMat);
-  terrain.receiveShadow = true;
+  terrain.receiveShadow = quality().shadows;
+  terrain.castShadow = false;
   terrain.name = 'terrain';
   Z().add(terrain);
   S.terrain = terrain;
@@ -432,7 +422,7 @@ function buildField() {
   // ---------- pond ----------
   const pond = new THREE.Mesh(
     new THREE.CircleGeometry(11, 28),
-    new THREE.MeshStandardMaterial({ color: 0x356e9e, transparent: true, opacity: 0.82, roughness: 0.1, metalness: 0.25 }),
+    new THREE.MeshLambertMaterial({ map: TEX.pbr('water', 3, 3), color: 0xffffff, transparent: true, opacity: 0.92 }),
   );
   pond.rotation.x = -Math.PI / 2;
   pond.position.set(44, -0.55, -34);
@@ -464,10 +454,13 @@ function buildVegetation(scene) {
   const group = new THREE.Group();
 
   // trees: towering Jugner-style giants in the NE woods, scattered elsewhere
+  const qv = quality();
   let placed = 0;
-  for (let i = 0; i < 900 && placed < 110; i++) {
+  const treeCap = qv.trees;
+  const forestCap = Math.round(treeCap * 0.55);
+  for (let i = 0; i < 900 && placed < treeCap; i++) {
     let x, z;
-    const inForest = placed < 60;
+    const inForest = placed < forestCap;
     if (inForest) {
       const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * 32;
       x = 55 + Math.cos(a) * r; z = 48 + Math.sin(a) * r;
@@ -484,8 +477,7 @@ function buildVegetation(scene) {
     placed++;
   }
 
-  // photoscanned boulders and rock clusters (Poly Haven)
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < qv.rocks; i++) {
     const x = rand(-92, 92), z = rand(-92, 92);
     if (inAnyClearing(x, z)) continue;
     const rock = env(Math.random() < 0.5 ? 'boulder' : 'rockset', rand(0.8, 2.2));
@@ -501,13 +493,13 @@ function buildVegetation(scene) {
   const p2 = p1.clone().rotateY(Math.PI / 2);
   const tuftGeo = mergeGeometries([p1, p2]);
   tuftGeo.translate(0, 0.26, 0);
-  const tuftMat = new THREE.MeshStandardMaterial({ map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.95, color: 0xe4e6a8 });
+  const tuftMat = new THREE.MeshLambertMaterial({ map: bladeTex, alphaTest: 0.4, side: THREE.DoubleSide, color: 0xffffff });
   attachWind(tuftMat);
-  painterlyStandard(tuftMat);
-  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 2600);
+  const tuftCap = qv.tufts;
+  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, tuftCap);
   const m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), e4 = new THREE.Euler(), s4 = new THREE.Vector3();
   let ti = 0;
-  for (let i = 0; i < 9000 && ti < 2600; i++) {
+  for (let i = 0; i < tuftCap * 4 && ti < tuftCap; i++) {
     const x = rand(-90, 90), z = rand(-90, 90);
     if (inAnyClearing(x, z)) continue;
     e4.set(0, rand(0, 6), 0);
@@ -522,12 +514,12 @@ function buildVegetation(scene) {
   Z().add(tufts);
 
   // forest ferns: bigger, darker tuft cards under the canopy
-  const fernMat = new THREE.MeshStandardMaterial({ map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1, color: 0x5d7a4a });
+  const fernMat = new THREE.MeshLambertMaterial({ map: bladeTex, alphaTest: 0.4, side: THREE.DoubleSide, color: 0x8aaa55 });
   attachWind(fernMat);
-  painterlyStandard(fernMat);
-  const ferns = new THREE.InstancedMesh(tuftGeo, fernMat, 320);
+  const fernCap = qv.ferns;
+  const ferns = new THREE.InstancedMesh(tuftGeo, fernMat, Math.max(1, fernCap));
   let fi = 0;
-  for (let i = 0; i < 1500 && fi < 320; i++) {
+  for (let i = 0; i < fernCap * 5 && fi < fernCap; i++) {
     const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * 32;
     const x = 55 + Math.cos(a) * r, z = 48 + Math.sin(a) * r;
     if (inAnyClearing(x, z) || Math.abs(x) > 92 || Math.abs(z) > 92) continue;
@@ -587,11 +579,10 @@ function buildCity(scene) {
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     geo.computeVertexNormals();
-    const plaza = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      map: TEX.pbr('paving', 10, 10), normalMap: TEX.pbrN('paving_n', 10, 10),
-      vertexColors: true, roughness: 0.96, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+    const plaza = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      map: TEX.pbr('paving', 4, 4),
+      vertexColors: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
     }));
-    painterlyStandard(plaza.material);
     plaza.receiveShadow = true;
     plaza.name = 'terrain';
     g.add(plaza);
@@ -599,7 +590,7 @@ function buildCity(scene) {
   }
 
   // corner houses — pitched roofs, timber, lit windows. Kept off the NPC spots.
-  const winMat = painterlyStandard(new THREE.MeshStandardMaterial({ color: 0xffe2a8, emissive: 0xffaa44, emissiveIntensity: 0.45, roughness: 0.5 }));
+  const winMat = new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffaa44, emissiveIntensity: 0.35 });
   windowMats.push(winMat);
   function house(x, z, rot, w = 4.2, d = 3.4, wallH = 2.5) {
     const h = new THREE.Group();
@@ -652,7 +643,7 @@ function buildCity(scene) {
     const f = new THREE.Group();
     f.add(mesh(uvCyl(1.5, 1.7, 0.45, 12, 1.2), M.paving, 0, 0.22, 0));
     f.add(mesh(uvCyl(1.15, 1.15, 0.35, 12, 1), M.bricks, 0, 0.55, 0));
-    const water = new THREE.Mesh(new THREE.CircleGeometry(1.05, 16), new THREE.MeshStandardMaterial({ color: 0x3a8ea4, roughness: 0.15, metalness: 0.05, transparent: true, opacity: 0.9 }));
+    const water = new THREE.Mesh(new THREE.CircleGeometry(1.05, 16), new THREE.MeshLambertMaterial({ map: TEX.pbr('water', 1, 1), transparent: true, opacity: 0.92 }));
     water.rotation.x = -Math.PI / 2;
     water.position.y = 0.74;
     f.add(water);
@@ -663,10 +654,10 @@ function buildCity(scene) {
   }
 
   // ---------- FFXI-style outpost: market stalls, tents, banners ----------
-  const awningRed = painterlyStandard(new THREE.MeshStandardMaterial({ map: TEX.awningStripes(), side: THREE.DoubleSide, roughness: 0.95 }));
-  const awningBlue = painterlyStandard(new THREE.MeshStandardMaterial({ map: TEX.awningStripes('#3a5a8e', '#e8e0d0'), side: THREE.DoubleSide, roughness: 0.95 }));
-  const canvasMat = painterlyStandard(new THREE.MeshStandardMaterial({ color: 0xd8cdb4, roughness: 1, side: THREE.DoubleSide }));
-  const bannerMat = painterlyStandard(new THREE.MeshStandardMaterial({ map: TEX.bannerSprite(), side: THREE.DoubleSide, roughness: 0.9 }));
+  const awningRed = new THREE.MeshLambertMaterial({ map: TEX.awningStripes(), side: THREE.DoubleSide });
+  const awningBlue = new THREE.MeshLambertMaterial({ map: TEX.awningStripes('#3a5a8e', '#e8e0d0'), side: THREE.DoubleSide });
+  const canvasMat = new THREE.MeshLambertMaterial({ color: 0xd8cdb4, side: THREE.DoubleSide });
+  const bannerMat = new THREE.MeshLambertMaterial({ map: TEX.bannerSprite(), side: THREE.DoubleSide });
 
   function stall(x, z, rot, awn) {
     const s = new THREE.Group();
@@ -719,7 +710,7 @@ function buildCity(scene) {
   shrine.add(mesh(uvCyl(1.8, 2.1, 0.5, 12, 1.8), M.paving, 0, 0.25, 0));
   for (const px of [-1.1, 1.1]) shrine.add(mesh(uvCyl(0.22, 0.26, 2.6, 8, 1.6), M.bricks, px, 1.8, 0));
   shrine.add(mesh(uvBox(3.0, 0.35, 0.7, 1.6), M.paving, 0, 3.25, 0));
-  const votive = new THREE.Mesh(new THREE.OctahedronGeometry(0.32), new THREE.MeshStandardMaterial({ color: 0x9fd0ff, emissive: 0x2a66e0, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }));
+  const votive = new THREE.Mesh(new THREE.OctahedronGeometry(0.32), new THREE.MeshLambertMaterial({ color: 0x9fd0ff, emissive: 0x2a66e0, emissiveIntensity: 0.55, transparent: true, opacity: 0.9 }));
   votive.position.y = 2.0;
   shrine.add(votive);
   placeOnGround(shrine, -4, -13);
@@ -733,10 +724,8 @@ function buildCity(scene) {
     const a = (i / 7) * Math.PI * 2;
     fire.add(mesh(new THREE.DodecahedronGeometry(0.18), M.paving, Math.cos(a) * 0.55, 0.1, Math.sin(a) * 0.55));
   }
-  const fl = new THREE.PointLight(0xff9d4d, 0, 10, 2);
-  fl.position.y = 0.7;
-  fire.add(fl);
-  lampLights.push({ light: fl, head: null });
+  const fl = lampLight(fire, 0.7, 0xff9d4d, 0, 10);
+  if (fl) lampLights.push({ light: fl, head: null });
   placeOnGround(fire, -9, 12);
   g.add(fire);
   addCollider(-9, 12, 0.8);
@@ -744,7 +733,7 @@ function buildCity(scene) {
   // stone wall + north gatehouse (San d'Oria-style masonry)
   function wallSeg(x, z, len, rot) {
     const w = new THREE.Group();
-    w.add(mesh(uvBox(len, 3.05, 1.25, 2.0), M.bricks, 0, 1.52, 0));
+    w.add(mesh(uvBox(len, 3.05, 1.25, 3.2), M.bricks, 0, 1.52, 0));
     w.add(mesh(uvBox(len, 0.28, 1.55, 1.6), M.paving, 0, 3.15, 0));
     const merlons = Math.max(2, Math.floor(len / 1.7));
     for (let i = 0; i < merlons; i++) {
@@ -786,13 +775,12 @@ function buildCity(scene) {
   for (const [lx, lz] of [[6, 12], [-8, -6], [10, -4], [3, 21]]) {
     const lamp = new THREE.Group();
     lamp.add(mesh(uvCyl(0.07, 0.09, 3, 6, 1.0), M.planks, 0, 1.5, 0));
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xff9d2e, emissiveIntensity: 0.4 }));
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffd27a, emissive: 0xff9d2e, emissiveIntensity: 0.45 }));
     head.position.y = 3.05;
-    const light = new THREE.PointLight(0xffb35c, 0, 14, 2);
-    light.position.y = 3;
-    lamp.add(head, light);
-    placeOnGround(lamp, lx, lz);
+    lamp.add(head);
+    const light = lampLight(lamp, 3, 0xffb35c, 0, 14);
     lampLights.push({ light, head });
+    placeOnGround(lamp, lx, lz);
     g.add(lamp);
     addCollider(lx, lz, 0.25);
   }
@@ -841,7 +829,7 @@ function buildRuins(scene) {
   veil.rotation.x = -Math.PI / 2;
   veil.position.y = 1.15;
   altar.add(veil);
-  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), new THREE.MeshStandardMaterial({ color: 0x9b6cd6, emissive: 0x6a30b0, emissiveIntensity: 0.8 }));
+  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), new THREE.MeshLambertMaterial({ color: 0x9b6cd6, emissive: 0x6a30b0, emissiveIntensity: 0.55 }));
   orb.position.set(-70, altar.position.y + 1.2, -68);
   g.add(orb);
   // scanned-rock rubble
@@ -857,11 +845,10 @@ function buildRuins(scene) {
   for (const dx of [-2.2, 2.2]) {
     const t = new THREE.Group();
     t.add(mesh(uvCyl(0.09, 0.12, 1.4, 6, 1.0), M.planks, 0, 0.7, 0));
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xff9d2e, emissiveIntensity: 0.5 }));
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffd27a, emissive: 0xff9d2e, emissiveIntensity: 0.5 }));
     head.position.y = 1.5;
-    const light = new THREE.PointLight(0xffb35c, 0, 12, 2);
-    light.position.y = 1.5;
-    t.add(head, light);
+    t.add(head);
+    const light = lampLight(t, 1.5, 0xffb35c, 0, 12);
     placeOnGround(t, -70 + dx, -65.5);
     lampLights.push({ light, head });
     g.add(t);
@@ -873,7 +860,7 @@ function buildRuins(scene) {
 
 function buildHomePoint(scene) {
   // the Mother Crystal — a crag-style monument, the Final Fantasy centerpiece
-  crystalMat = new THREE.MeshStandardMaterial({ color: 0x6fb4ff, emissive: 0x2a66e0, emissiveIntensity: 0.85, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.86 });
+  crystalMat = new THREE.MeshLambertMaterial({ color: 0x9ec8ff, emissive: 0x2a66e0, emissiveIntensity: 0.5, transparent: true, opacity: 0.9 });
   const grp = new THREE.Group();
   grp.add(mesh(uvCyl(4.4, 5.0, 0.6, 16, 1.8), M.paving, 0, 0.3, 0));     // two-step dais
   grp.add(mesh(uvCyl(3.2, 3.7, 0.6, 16, 1.8), M.paving, 0, 0.9, 0));
@@ -891,9 +878,8 @@ function buildHomePoint(scene) {
   spire(1.6, -0.8, 3.1, 0.7, 0.24, 2.4);
   spire(1.1, 1.4, 2.1, 0.5, 0.3, 0.2);
   spire(-1.0, -1.5, 1.8, 0.45, -0.22, 1.8);
-  const glow = new THREE.PointLight(0x6fb4ff, 2.2, 30, 1.8);
-  glow.position.y = 4;
-  grp.add(glow);
+  const glow = lampLight(grp, 4, 0x6fb4ff, 1.2, 18);
+  if (glow) glow.intensity = 1.2;
   placeOnGround(grp, 3, -5);
   Z().add(grp);
   addCollider(3, -5, 2.3);   // the spire cluster — the dais steps stay walkable
@@ -908,16 +894,10 @@ function buildHomePoint(scene) {
 // ---------- beach: reflective ocean + palms ----------
 let ocean;
 function buildBeach(scene) {
-  ocean = new Water(new THREE.PlaneGeometry(900, 380), {
-    textureWidth: 512,
-    textureHeight: 512,
-    waterNormals: TEX.waterNormals(),
-    sunDirection: new THREE.Vector3(0.3, 0.8, 0.2),
-    sunColor: 0xffffff,
-    waterColor: 0x1c6a72,
-    distortionScale: 1.55,
-    fog: true,
-  });
+  const sea = M.water.clone();
+  sea.map = M.water.map.clone();
+  sea.map.needsUpdate = true;
+  ocean = new THREE.Mesh(own(new THREE.PlaneGeometry(900, 380)), sea);
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.set(-100, -1.15, 270);
   Z().add(ocean);
@@ -934,7 +914,8 @@ function buildBeach(scene) {
 
   // palms: real bark trunks + painterly frond cards
   let placed = 0;
-  for (let tries = 0; tries < 400 && placed < 26; tries++) {
+  const palmCap = quality().palms;
+  for (let tries = 0; tries < 400 && placed < palmCap; tries++) {
     const x = rand(-88, 14), z = rand(60, 84);
     const h = terrainHeight(x, z);
     if (h < -0.9 || h > 1.6 || coastFactor(x, z) < 0.05) continue;
@@ -970,10 +951,11 @@ function buildBeach(scene) {
 let clouds = [], stars, sunSprite, moonSprite;
 function buildSky(scene) {
   const cloudTex = TEX.cloudSprite();
-  for (let i = 0; i < 14; i++) {
-    const mat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.75, fog: false, depthWrite: false });
+  const cloudN = quality().id === 'low' ? 5 : quality().id === 'high' ? 10 : 7;
+  for (let i = 0; i < cloudN; i++) {
+    const mat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.7, fog: false, depthWrite: false });
     const c = new THREE.Sprite(mat);
-    const s = rand(46, 100);
+    const s = rand(36, quality().id === 'low' ? 64 : 88);
     c.scale.set(s, s * 0.42, 1);
     c.position.set(rand(-260, 260), rand(58, 100), rand(-260, 260));
     scene.add(c);
@@ -1020,7 +1002,7 @@ function buildRidges(scene) {
     g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide })));
+    scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })));
   };
   ridge(122, 34, 0x8ea49a, 0xb7c8bf, 3);
   ridge(156, 54, 0x9eb0b6, 0xc9d6de, 11);
@@ -1032,7 +1014,8 @@ const sunDirV = new THREE.Vector3();
 const _focus = new THREE.Vector3();
 
 function buildDust(scene) {
-  const n = 150;
+  const n = quality().dust;
+  if (!n) return;
   const geo = new THREE.BufferGeometry();
   const arr = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
@@ -1144,7 +1127,7 @@ function buildDungeon() {
   dwall(ox - 9, oz + 24, 6, 1.1);
   // end dais
   g.add(mesh(uvBox(4, 0.4, 4, 1.4), M.paving, ox, 0.2, oz + 46));
-  const relic = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), new THREE.MeshStandardMaterial({ color: 0x9b6cd6, emissive: 0x6a30b0, emissiveIntensity: 0.9 }));
+  const relic = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), new THREE.MeshLambertMaterial({ color: 0x9b6cd6, emissive: 0x6a30b0, emissiveIntensity: 0.55 }));
   relic.position.set(ox, 1.3, oz + 46);
   g.add(relic);
 
@@ -1158,11 +1141,10 @@ function buildDungeon() {
   for (const [lx, lz] of [[ox - 4.2, oz + 12], [ox + 4.2, oz + 22], [ox - 4.2, oz + 34], [ox + 4.2, oz + 44]]) {
     const torch = new THREE.Group();
     torch.add(mesh(uvCyl(0.06, 0.08, 1.1, 5, 0.4), M.planks, 0, 0.7, 0));
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xff9d2e, emissiveIntensity: 1.1 }));
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffd27a, emissive: 0xff9d2e, emissiveIntensity: 0.7 }));
     head.position.y = 1.25;
-    const light = new THREE.PointLight(0xffb35c, 1.4, 9, 2);
-    light.position.y = 1.3;
-    torch.add(head, light);
+    torch.add(head);
+    const light = lampLight(torch, 1.3, 0xffb35c, 0.8, 9);
     torch.position.set(lx, 0, lz);
     g.add(torch);
     lampLights.push({ light, head });
@@ -1203,11 +1185,11 @@ export function updateDayCycle(dt) {
   const focus = S.player ? _focus.copy(S.player.pos) : _focus.set(0, 0.6, 4);
   sun.position.copy(focus).addScaledVector(sunDirV, 48);
   sun.target.position.copy(focus);
-  sun.intensity = lerp(0.04, 1.35, dayF);
+  sun.intensity = lerp(0.05, 1.15, dayF);
   sun.color.copy(SUN_DAY).lerp(SUN_DAWN, clamp(dawnF, 0, 1) * 0.75);
-  hemi.intensity = lerp(0.16, 0.7, dayF);
+  hemi.intensity = lerp(0.32, 0.85, dayF);
   hemi.color.copy(HEMI_DAY).lerp(HEMI_DAWN, clamp(dawnF, 0, 1) * 0.55);
-  ambient.intensity = lerp(0.14, 0.3, dayF);
+  ambient.intensity = lerp(0.24, 0.42, dayF);
   ambient.color.copy(AMBIENT_DAY).lerp(AMBIENT_NIGHT, 1 - dayF);
 
   const fogC = SKY_NIGHT.clone().lerp(SKY_DAY, dayF).lerp(SKY_DAWN, clamp(dawnF, 0, 1) * 0.55);
@@ -1249,10 +1231,10 @@ export function updateDayCycle(dt) {
   }
 
   for (const { light, head } of lampLights) {
-    light.intensity = lerp(1.6, 0, dayF);
-    if (head) head.material.emissiveIntensity = lerp(1.2, 0.15, dayF);
+    if (light) light.intensity = lerp(1.1, 0, dayF);
+    if (head && head.material) head.material.emissiveIntensity = lerp(0.65, 0.12, dayF);
   }
-  for (const wm of windowMats) wm.emissiveIntensity = lerp(0.9, 0.05, dayF);
+  for (const wm of windowMats) wm.emissiveIntensity = lerp(0.42, 0.06, dayF);
 
   if (stars) stars.material.opacity = clamp(1 - dayF * 1.6, 0, 1);
   if (fireflies) {
@@ -1286,12 +1268,10 @@ export function updateDayCycle(dt) {
     }
   }
 
-  if (ocean) {
-    ocean.material.uniforms.time.value += dt * 0.5;
-    ocean.material.uniforms.sunDirection.value.copy(sunDirV);
-    ocean.material.uniforms.sunColor.value.copy(sun.color).multiplyScalar(clamp(dayF, 0.05, 1));
-    if (S.surf) S.surf.material.opacity = (0.08 + (Math.sin(performance.now() / 1300) + 1) * 0.07) * (0.3 + dayF * 0.7);
+  if (ocean && ocean.material && ocean.material.map) {
+    ocean.material.map.offset.x += dt * 0.01;
   }
+  if (S.surf) S.surf.material.opacity = (0.08 + (Math.sin(performance.now() / 1300) + 1) * 0.05) * (0.3 + dayF * 0.7);
   if (S.crystal) {
     S.crystal.rotation.y += dt * 0.6;
     S.crystal.position.y = terrainHeight(3, -3) + 2.05 + Math.sin(performance.now() / 700) * 0.12;

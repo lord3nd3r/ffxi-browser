@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { S } from './state.js';
+import { quality, qualityName, cycleQuality } from './quality.js';
 import { initWorld, updateDayCycle } from './world.js';
 import { initGame, updateGame, loadGame, saveGame, respawnPlayer, setTarget, spawnBurst, findActor } from './game.js';
 import * as FX from './effects.js';
@@ -24,14 +24,15 @@ const app = document.getElementById('app');
 window.__S = S; // debug/testing handle
 import('./game.js').then(g => { window.__game = g; });
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const q0 = quality();
+const renderer = new THREE.WebGLRenderer({ antialias: q0.antialias, alpha: false });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q0.pixelRatio));
+renderer.shadowMap.enabled = q0.shadows;
+renderer.shadowMap.type = q0.shadowType === 'pcf' ? THREE.PCFShadowMap : THREE.BasicShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.96;
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMappingExposure = 1;
 renderer.domElement.classList.add('webgl');
 app.appendChild(renderer.domElement);
 S.renderer = renderer;
@@ -40,32 +41,34 @@ S.scene = new THREE.Scene();
 S.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 600);
 S.camera.position.set(0, 8, 14);
 
-// soft daylight environment reflections for PBR materials
-{
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const envScene = new THREE.Scene();
-  envScene.background = new THREE.Color(0xb7cfc4);
-  const hemiE = new THREE.HemisphereLight(0xd5e6ee, 0x8a7452, 1.1);
-  envScene.add(hemiE);
-  S.scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-  S.scene.environmentIntensity = 0.16;
+// No environment map. Image-based specular was the glossy look and a startup cost.
+let composer = null;
+if (q0.post) {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(S.scene, S.camera));
+  const grade = new ShaderPass(VanaGradeShader);
+  composer.addPass(grade);
+  S.grade = grade.uniforms;
+  composer.addPass(new OutputPass());
 }
 
-// post: gentle bloom + soft grade, rendered with 4x MSAA
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, { samples: 2, type: THREE.HalfFloatType }));
-composer.addPass(new RenderPass(S.scene, S.camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.16, 0.5, 0.84);
-composer.addPass(bloom);
-const grade = new ShaderPass(VanaGradeShader);
-composer.addPass(grade);
-S.grade = grade.uniforms;
-composer.addPass(new OutputPass());
+function bindQualityButton() {
+  const b = document.getElementById('btn-quality');
+  if (!b) return;
+  b.textContent = 'Graphics: ' + qualityName();
+  b.addEventListener('click', () => {
+    cycleQuality();
+    try { saveGame(); } catch (e) { /* not in game yet */ }
+    location.reload();
+  });
+}
+bindQualityButton();
 
 window.addEventListener('resize', () => {
   S.camera.aspect = window.innerWidth / window.innerHeight;
   S.camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
 });
 
 document.getElementById('load-status').textContent = 'Shaping the plains…';
@@ -437,6 +440,7 @@ function loop() {
     S.camera.position.set(Math.sin(t) * 26, 12, Math.cos(t) * 26);
     S.camera.lookAt(0, 2, 0);
   }
-  composer.render();
+  if (composer) composer.render();
+  else renderer.render(S.scene, S.camera);
 }
 loop();

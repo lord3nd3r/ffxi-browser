@@ -309,7 +309,7 @@ const matCache = new Map();
 function mat(color, opts = {}) {
   const key = color + JSON.stringify(opts);
   if (!matCache.has(key)) {
-    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0, flatShading: false, ...opts });
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, flatShading: false, ...opts });
     painterlyStandard(m);
     matCache.set(key, m);
   }
@@ -360,8 +360,8 @@ export function makeWeapon(kind) {
   const cyl = (rt, rb, h, m, seg = 7) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m); o.castShadow = true; return o; };
   const sph = (r, m) => { const o = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 8), m); o.castShadow = true; return o; };
   
-  const steel = mat(0xd5d8e0, { metalness: 0.35, roughness: 0.42 });
-  const gold = mat(0xd4b15a, { metalness: 0.4, roughness: 0.38 });
+  const steel = mat(0xc5c8d0, { metalness: 0, roughness: 1 });
+  const gold = mat(0xc4a15a, { metalness: 0, roughness: 1 });
   if (kind === 'sword') {
     const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.045, 0.95, 4), steel);
     blade.scale.z = 0.28;

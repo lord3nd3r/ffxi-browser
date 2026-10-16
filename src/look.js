@@ -8,8 +8,9 @@ const WRAP_CHUNK = ShaderChunk.lights_physical_pars_fragment.replace(
   'float dotNL = saturate( dot( geometryNormal, directLight.direction ) * 0.58 + 0.42 );',
 );
 
-// Soften PBR so skin, cloth, and scanned rocks read as painted miniatures
-// rather than glossy plastic. Safe to call more than once.
+// Matte painted miniatures. Specular, metal, clearcoat and normal maps are
+// what made the scene read as glossy plastic, and they are expensive.
+// Safe to call more than once.
 export function painterlyStandard(mat) {
   const list = Array.isArray(mat) ? mat : [mat];
   for (const m of list) {
@@ -18,9 +19,16 @@ export function painterlyStandard(mat) {
     // needs the shader hooks (hit-flash materials are cloned per actor).
     if (m.userData.painterly && Object.prototype.hasOwnProperty.call(m, 'onBeforeCompile')) continue;
     m.userData.painterly = true;
-    m.envMapIntensity = Math.min(m.envMapIntensity ?? 1, 0.2);
-    m.roughness = Math.max(m.roughness ?? 0.5, 0.58);
-    if ((m.metalness ?? 0) > 0.25) m.metalness = 0.22;
+    m.metalness = 0;
+    m.metalnessMap = null;
+    m.roughness = 1;
+    m.roughnessMap = null;
+    m.envMapIntensity = 0;
+    m.envMap = null;
+    m.normalMap = null;
+    if ('clearcoat' in m) m.clearcoat = 0;
+    if ('sheen' in m) m.sheen = 0;
+    if ('transmission' in m) m.transmission = 0;
     const prev = m.onBeforeCompile;
     m.onBeforeCompile = (shader) => {
       if (prev && prev !== m.onBeforeCompile) prev(shader);
@@ -28,12 +36,11 @@ export function painterlyStandard(mat) {
         .replace('#include <lights_physical_pars_fragment>', WRAP_CHUNK)
         .replace(
           'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
-          `totalSpecular *= 0.36;
-	totalDiffuse += diffuseColor.rgb * vec3(0.05, 0.042, 0.032);
+          `totalSpecular *= 0.02;
 	vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;`,
         );
     };
-    m.customProgramCacheKey = () => m.userData.shaderKey || 'vana-painterly-v1';
+    m.customProgramCacheKey = () => m.userData.shaderKey || 'vana-matte-v2';
     m.needsUpdate = true;
   }
   return mat;

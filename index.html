@@ -182,6 +182,14 @@
     #ctxmenu .item:hover { background: rgba(91,116,181,.45); }
 
     /* ---------- top-left help hint ---------- */
+    #btn-quality {
+      position: absolute; left: 12px; top: 56px; z-index: 40;
+      font: 11px Verdana, Geneva, sans-serif; color: #ffe7a0;
+      background: linear-gradient(#243660, #12182e);
+      border: 1px solid #c6b27a; border-radius: 2px;
+      padding: 3px 8px; cursor: pointer;
+    }
+    #btn-quality:hover { border-color: #ffe9a0; }
     #hint { position: absolute; left: 12px; top: 12px; font-size: 10px; color: #8a96b8; text-shadow: 0 1px 2px #000; line-height: 1.6; }
     #hint b { color: #cdd7f3; }
 
@@ -223,6 +231,7 @@
 <body>
   <div id="app"></div>
 
+  <button id="btn-quality" type="button">Graphics: Low</button>
   <div id="hint">
     <b>Left-click</b> ground: move &nbsp;·&nbsp; <b>L+R mouse</b>: run &nbsp;·&nbsp; <b>R-drag</b>: camera &nbsp;·&nbsp; <b>WASD</b>: move<br/>
     <b>Tab</b>: target &nbsp;·&nbsp; <b>1–0</b>: hotbar &nbsp;·&nbsp; <b>M</b>: magic book &nbsp;·&nbsp; <b>R-click</b> target: menu &nbsp;·&nbsp; <b>F</b>: 1st person &nbsp;·&nbsp; <b>?</b> Help
