@@ -15,7 +15,7 @@ function loadTex(url, srgb = true) {
 
 // color map (sRGB); pass a repeat to tile
 export function pbr(name, rx = 1, ry = rx) {
-  const t = loadTex(`textures/pbr/${name}.jpg?v=painted2`);
+  const t = loadTex(`textures/pbr/${name}.jpg?v=painted4`);
   t.repeat.set(rx, ry);
   return t;
 }

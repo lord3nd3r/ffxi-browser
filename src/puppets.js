@@ -50,7 +50,7 @@ export function applySnapshot(snapshot) {
       });
 
       const plate = makeNameplate(p.bazaar ? `🛒 ${p.charName}` : p.charName, '#e8edf8');
-      plate.position.y = 2.05;
+      plate.position.y = 2.28;
       group.add(plate);
 
       e.mesh = group;
@@ -92,7 +92,7 @@ export function applySnapshot(snapshot) {
         });
 
         const plate = makeNameplate(p.bazaar ? `🛒 ${p.charName}` : p.charName, '#e8edf8');
-        plate.position.y = 2.05;
+        plate.position.y = 2.28;
         group.add(plate);
 
         // Keep current position and rotation for smooth interpolation
@@ -118,7 +118,7 @@ export function applySnapshot(snapshot) {
         const e = existing.entity;
         if (e.plate) e.mesh.remove(e.plate);
         e.plate = makeNameplate(existing.bazaar ? `🛒 ${p.charName}` : p.charName, '#e8edf8');
-        e.plate.position.y = 2.05;
+        e.plate.position.y = 2.28;
         e.mesh.add(e.plate);
       }
       existing.entity.job = p.job;

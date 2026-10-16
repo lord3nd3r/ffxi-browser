@@ -104,7 +104,7 @@ export function buildPlayerMesh() {
   if (p.mesh) { px = p.pos.x; pz = p.pos.z; S.scene.remove(p.mesh); }
   const group = giveModel(p, JOB_MODEL[p.job], { appearance: S.appearance });
   const plate = makeNameplate(S.charName, '#e8edf8', '', true);
-  plate.position.y = 2.05;
+  plate.position.y = 2.28;
   group.add(plate);
   p.plate = plate;
   group.position.set(px, S.heightAt(px, pz), pz);
@@ -118,7 +118,7 @@ function addCompanion(c, pos) {
   e.weaponItem = STARTER_WEAPON[c.job];
   applyJobStats(e, c.job, lvl);
   const plate = makeNameplate(c.name, '#cfe3f8', '', true);
-  plate.position.y = 2.05;
+  plate.position.y = 2.28;
   group.add(plate);
   e.plate = plate;
   group.position.set(pos.x, S.heightAt(pos.x, pos.z), pos.z);
@@ -132,7 +132,7 @@ function spawnAlly(c, spot) {
   const e = new Entity({ kind: 'npc', name: c.name, npc: { id: 'ally_' + c.name, name: c.name, role: 'ally', ally: c, x: spot.x, z: spot.z } });
   const group = giveModel(e, c.model, { appearance: c.appearance });
   const plate = makeNameplate(c.name, '#8fd3a8');
-  plate.position.y = 2.05;
+  plate.position.y = 2.28;
   group.add(plate);
   e.plate = plate;
   group.position.set(spot.x, S.heightAt(spot.x, spot.z), spot.z);
@@ -239,11 +239,11 @@ function spawnNpcs(list) {
     const look = NPC_LOOK[n.id] || { model: 'Rogue', skin: 0xd8a87c, hair: 0x4a2f1d, hairStyle: 'Hair_SimpleParted' };
     const e = new Entity({ kind: 'npc', name: n.name, npc: n });
     const group = giveModel(e, look.model, {
-      scale: n.small ? 0.55 : 0.9,
+      scale: n.small ? 0.58 : 1,
       appearance: { skin: look.skin, hair: look.hair, hairStyle: look.hairStyle, beard: !!look.beard, cape: look.cape },
     });
     const plate = makeNameplate(n.name, n.role === 'quest' ? '#f3e2a0' : '#d5eccf');
-    plate.position.y = n.small ? 1.6 : 2.35;
+    plate.position.y = n.small ? 1.7 : 2.55;
     group.add(plate);
     e.plate = plate;
     if (n.role === 'quest') {

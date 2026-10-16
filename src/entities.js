@@ -152,7 +152,7 @@ const SKIN_REF = new THREE.Color(0xd8a87c);   // the base texture's mid skin ton
 
 // clone a rigged character; returns { group, mixer, anims, parts }
 // appearance: { skin, hair } colors (char-create choices), hairStyle override, beard flag
-export function makeCharacterModel(name, { scale = 0.9, appearance = null } = {}) {
+export function makeCharacterModel(name, { scale = 1, appearance = null } = {}) {
   const cfg = CHAR_CONFIG[name] || CHAR_CONFIG.Knight;
   const src = MODELS[cfg.outfit];
   if (!src) {
@@ -199,7 +199,7 @@ export function makeCharacterModel(name, { scale = 0.9, appearance = null } = {}
   const headBone = boneByName.head || boneByName.Head;
   const attachToHead = (styleName) => {
     if (!styleName || !HAIR[styleName] || !headBone) return;
-    const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.72 });
+    const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 1 });
     const h = HAIR[styleName].clone(true);
     h.traverse(o => { if (o.isMesh) { o.material = hairMat; o.castShadow = true; } });
     rig.add(h);
@@ -234,11 +234,12 @@ export function makeCharacterModel(name, { scale = 0.9, appearance = null } = {}
   if (cfg.weapon) {
     const w = makeWeapon(cfg.weapon);
     w.rotation.set(0.15, 0, 0);          // blade along the grip axis, slight forward tilt
+    w.scale.setScalar(1.32);
     hand.add(w);
   }
 
   const parts = { body: rig, hand };
-  attachBlob(rig, 0.62);
+  attachBlob(rig, 0.72);
   return { group: rig, mixer, anims, parts };
 }
 
@@ -253,19 +254,27 @@ const CAPE_OF = {
 function attachCape(rig, boneByName, color) {
   const bone = boneByName.spine_02 || boneByName.spine_01 || boneByName.Spine_02 || boneByName.chest || boneByName.spine;
   if (!bone) return;
-  const geo = new THREE.PlaneGeometry(0.46, 0.62, 1, 4);
+  const geo = new THREE.PlaneGeometry(0.82, 1.12, 3, 7);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
-    pos.setZ(i, -0.05 - (0.31 - y) * 0.22);
+    const x = pos.getX(i);
+    const t = (0.56 - y) / 1.12;
+    pos.setX(i, x * (1 + t * 0.22));
+    pos.setZ(i, -0.03 - t * 0.42 - Math.abs(x) * 0.12);
   }
-  const mat = painterlyStandard(new THREE.MeshStandardMaterial({ color, roughness: 0.88, side: THREE.DoubleSide }));
+  geo.computeVertexNormals();
+  const mat = painterlyStandard(new THREE.MeshStandardMaterial({ color, roughness: 1, side: THREE.DoubleSide }));
   const cape = new THREE.Mesh(geo, mat);
-  cape.position.set(0, 0.12, -0.14);
+  cape.position.set(0, -0.02, -0.16);
   cape.castShadow = true;
-  rig.add(cape);
+  const collar = new THREE.Mesh(new THREE.PlaneGeometry(0.48, 0.16), mat);
+  collar.position.set(0, 0.28, -0.06);
+  collar.rotation.x = 0.55;
+  rig.add(cape, collar);
   rig.updateMatrixWorld(true);
   bone.attach(cape);
+  bone.attach(collar);
 }
 
 // loop-animation state machine helpers
@@ -363,35 +372,43 @@ export function makeWeapon(kind) {
   const steel = mat(0xc5c8d0, { metalness: 0, roughness: 1 });
   const gold = mat(0xc4a15a, { metalness: 0, roughness: 1 });
   if (kind === 'sword') {
-    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.045, 0.95, 4), steel);
-    blade.scale.z = 0.28;
-    blade.position.y = 0.62;
+    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.07, 1.05, 4), steel);
+    blade.scale.z = 0.45;
+    blade.position.y = 0.68;
     blade.castShadow = true;
-    const guard = box(0.28, 0.045, 0.07, gold);
-    guard.position.y = 0.14;
-    const grip = cyl(0.032, 0.036, 0.26, mat(0x4a2f1d));
-    const pom = sph(0.045, gold);
-    pom.position.y = -0.14;
-    g.add(blade, guard, grip, pom);
+    const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.7, 0.012), gold);
+    fuller.position.y = 0.72;
+    const guard = box(0.36, 0.05, 0.09, gold);
+    guard.position.y = 0.16;
+    const grip = cyl(0.034, 0.04, 0.28, mat(0x4a2f1d));
+    const pom = sph(0.05, gold);
+    pom.position.y = -0.16;
+    g.add(blade, fuller, guard, grip, pom);
   } else if (kind === 'dagger') {
-    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.03, 0.48, 4), steel);
-    blade.scale.z = 0.3;
-    blade.position.y = 0.36;
+    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.04, 0.55, 4), steel);
+    blade.scale.z = 0.42;
+    blade.position.y = 0.4;
     blade.castShadow = true;
-    const grip = cyl(0.028, 0.03, 0.2, mat(0x2c241c));
-    g.add(blade, grip);
+    const grip = cyl(0.03, 0.034, 0.22, mat(0x2c241c));
+    const guard = box(0.16, 0.03, 0.05, gold);
+    guard.position.y = 0.12;
+    g.add(blade, grip, guard);
   } else if (kind === 'club') {
-    const head = cyl(0.12, 0.07, 0.45, mat(0x8a6a3f));
-    head.position.y = 0.55;
-    const grip = cyl(0.04, 0.04, 0.5, mat(0x5a4028));
-    grip.position.y = 0.1;
-    g.add(head, grip);
+    const head = cyl(0.14, 0.08, 0.5, mat(0x8a6a3f));
+    head.position.y = 0.62;
+    const band = cyl(0.15, 0.15, 0.06, gold, 8);
+    band.position.y = 0.42;
+    const grip = cyl(0.042, 0.045, 0.55, mat(0x5a4028));
+    grip.position.y = 0.08;
+    g.add(head, band, grip);
   } else if (kind === 'staff') {
-    const pole = cyl(0.035, 0.045, 1.5, mat(0x6b4a2f));
-    pole.position.y = 0.45;
-    const gem = sph(0.1, mat(0x9b6cd6, { emissive: 0x6a30b0, emissiveIntensity: 0.7 }));
-    gem.position.y = 1.25;
-    g.add(pole, gem);
+    const pole = cyl(0.038, 0.05, 1.65, mat(0x6b4a2f));
+    pole.position.y = 0.5;
+    const gem = sph(0.12, mat(0x9b6cd6, { emissive: 0x6a30b0, emissiveIntensity: 0.85 }));
+    gem.position.y = 1.38;
+    const cap = cyl(0.07, 0.09, 0.08, gold, 6);
+    cap.position.y = 1.22;
+    g.add(pole, gem, cap);
   }
   return g;
 }

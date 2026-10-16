@@ -398,7 +398,7 @@ export function hideCastbar() { $('castbar').style.display = 'none'; }
 const mmCtx = () => $('minimap').getContext('2d');
 export function updateMinimap() {
   const cx = mmCtx();
-  const W = 140;
+  const W = 168;
   const b = minimapBounds();
   const scale = W / (b.maxX - b.minX);
   const px = (x) => (x - b.minX) * scale, pz = (z) => (z - b.minZ) * scale;

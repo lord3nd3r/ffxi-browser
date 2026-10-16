@@ -5,7 +5,7 @@ import { ShaderChunk } from 'three';
 
 const WRAP_CHUNK = ShaderChunk.lights_physical_pars_fragment.replace(
   'float dotNL = saturate( dot( geometryNormal, directLight.direction ) );',
-  'float dotNL = saturate( dot( geometryNormal, directLight.direction ) * 0.58 + 0.42 );',
+  'float dotNL = saturate( dot( geometryNormal, directLight.direction ) * 0.8 + 0.2 );',
 );
 
 // Matte painted miniatures. Specular, metal, clearcoat and normal maps are
@@ -37,10 +37,11 @@ export function painterlyStandard(mat) {
         .replace(
           'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
           `totalSpecular *= 0.02;
+	totalDiffuse = mix(vec3(dot(totalDiffuse, vec3(0.3, 0.59, 0.11))), totalDiffuse, 1.22);
 	vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;`,
         );
     };
-    m.customProgramCacheKey = () => m.userData.shaderKey || 'vana-matte-v2';
+    m.customProgramCacheKey = () => m.userData.shaderKey || 'vana-matte-v3';
     m.needsUpdate = true;
   }
   return mat;
