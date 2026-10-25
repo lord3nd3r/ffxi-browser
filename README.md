@@ -1,5 +1,7 @@
 # Vana'diel Reverie
 
+[![Donate - PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?style=for-the-badge&logo=paypal&logoColor=white)](https://3nd3r.net/paypal) [![Donate - BTC](https://img.shields.io/badge/Donate-BTC-f7931a?style=for-the-badge&logo=bitcoin&logoColor=white)](https://3nd3r.net/btc)
+
 A Final Fantasy XI–style browser MMORPG built with Three.js. Single-player with AI party
 companions: jobs (WAR/MNK/WHM/BLM/THF), auto-attack combat, weapon skills, spells, quests,
 crafting, gathering, vendors, a day/night cycle, and a field boss.
