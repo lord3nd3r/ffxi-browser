@@ -2,21 +2,20 @@
 // architecture, three.js water normals, plus painterly canvas foliage —
 // the same trunk + alpha-card technique FFXI itself uses for trees.
 import * as THREE from 'three';
-import { S } from './state.js';
+import { quality } from './quality.js';
 
 const textureLoader = new THREE.TextureLoader();
 function loadTex(url, srgb = true) {
   const tex = textureLoader.load(url);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
-  // sharp at grazing angles — the difference between mush and detail on the ground
-  tex.anisotropy = S.renderer ? S.renderer.capabilities.getMaxAnisotropy() : 8;
+  tex.anisotropy = quality().anisotropy;
   return tex;
 }
 
 // color map (sRGB); pass a repeat to tile
 export function pbr(name, rx = 1, ry = rx) {
-  const t = loadTex(`textures/pbr/${name}.jpg`);
+  const t = loadTex(`textures/pbr/${name}.jpg?v=painted4`);
   t.repeat.set(rx, ry);
   return t;
 }
@@ -47,22 +46,36 @@ function canvas(w, h, draw) {
 
 const R = (a, b) => a + Math.random() * (b - a);
 
-// painterly broadleaf canopy: hundreds of leaf daubs with radial falloff
+// Broad painted leaves in a clump. Large shapes stay readable after mipmapping,
+// which the old stipple of tiny dots did not.
 export function foliageSprite() {
   const tex = canvas(256, 256, (cx, w, h) => {
     cx.clearRect(0, 0, w, h);
-    const cxr = w / 2, cyr = h / 2;
-    for (let i = 0; i < 520; i++) {
-      const a = R(0, Math.PI * 2), r = Math.pow(Math.random(), 0.62) * 116;
-      const x = cxr + Math.cos(a) * r, y = cyr + Math.sin(a) * r * 0.92;
-      const edge = r / 116;
-      // darker core, brighter sunlit edge
-      const hue = R(88, 112), sat = R(34, 52), lit = 20 + edge * R(16, 26);
-      cx.fillStyle = `hsla(${hue},${sat}%,${lit}%,${R(0.75, 0.95)})`;
-      const s = R(4, 9) * (1 - edge * 0.35);
+    const leaves = [
+      [128, 150, 70, 46, 0.4, '#6f9a32'],
+      [90, 120, 54, 34, -0.6, '#8fb84a'],
+      [168, 118, 58, 36, 0.7, '#c6d86a'],
+      [120, 86, 48, 30, -0.2, '#4f7a28'],
+      [150, 168, 44, 28, 0.9, '#d5e48a'],
+      [78, 168, 40, 26, 0.3, '#7aa43c'],
+      [180, 170, 36, 24, -0.8, '#9cba48'],
+      [128, 118, 36, 50, 1.2, '#5e882c'],
+    ];
+    for (const [x, y, rx, ry, rot, col] of leaves) {
+      cx.save();
+      cx.translate(x, y);
+      cx.rotate(rot);
+      cx.fillStyle = col;
       cx.beginPath();
-      cx.ellipse(x, y, s, s * R(0.55, 0.8), R(0, 3.2), 0, 7);
+      cx.ellipse(0, 0, rx, ry, 0, 0, 7);
       cx.fill();
+      cx.strokeStyle = 'rgba(40,60,16,0.45)';
+      cx.lineWidth = 2;
+      cx.beginPath();
+      cx.moveTo(0, ry * 0.7);
+      cx.lineTo(0, -ry * 0.75);
+      cx.stroke();
+      cx.restore();
     }
   });
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -73,17 +86,18 @@ export function foliageSprite() {
 export function pineSprite() {
   const tex = canvas(256, 256, (cx, w, h) => {
     cx.clearRect(0, 0, w, h);
-    for (let i = 0; i < 700; i++) {
-      const t = Math.random();                       // 0 top, 1 bottom
-      const y = 18 + t * 215;
-      const half = 8 + t * 112;
+    const cols = ['#2f6a34', '#4e8a40', '#1f4e28', '#6aa04a', '#3d7840'];
+    for (let i = 0; i < 90; i++) {
+      const t = Math.random();
+      const y = 16 + t * 220;
+      const half = 10 + t * 108;
       const x = w / 2 + R(-half, half);
-      const hue = R(95, 130), lit = R(14, 30) + (1 - Math.abs(x - w / 2) / half) * 6;
-      cx.strokeStyle = `hsla(${hue},${R(28, 44)}%,${lit}%,${R(0.7, 0.95)})`;
-      cx.lineWidth = R(1.2, 2.4);
+      cx.strokeStyle = cols[i % cols.length];
+      cx.lineWidth = R(2.5, 5);
+      cx.lineCap = 'round';
       cx.beginPath();
       cx.moveTo(x, y);
-      cx.lineTo(x + R(-7, 7), y + R(6, 15));
+      cx.lineTo(x + R(-10, 10), y + R(10, 22));
       cx.stroke();
     }
   });
@@ -177,14 +191,14 @@ export function glowSprite(inner = 'rgba(255,244,214,1)', outer = 'rgba(255,244,
 export function grassBlades() {
   const tex = canvas(64, 64, (cx, w, h) => {
     cx.clearRect(0, 0, w, h);
-    for (let i = 0; i < 14; i++) {
-      const x = R(4, w - 4), top = R(4, 26), wd = R(2.5, 5);
-      const hue = Math.floor(R(78, 102));
-      cx.fillStyle = `hsl(${hue},45%,${Math.floor(R(28, 40))}%)`;
+    const cols = ['#d5e07a', '#8aaa3c', '#f0eca0', '#5e8428', '#c6d460'];
+    for (let i = 0; i < 7; i++) {
+      const x = 8 + i * 8, top = R(2, 14), wd = R(3, 5.5);
+      cx.fillStyle = cols[i % cols.length];
       cx.beginPath();
       cx.moveTo(x - wd, h);
-      cx.quadraticCurveTo(x - wd * 0.3, top + 14, x + R(-3, 3), top);
-      cx.quadraticCurveTo(x + wd * 0.4, top + 16, x + wd, h);
+      cx.quadraticCurveTo(x - wd * 0.2, top + 16, x + R(-2, 2), top);
+      cx.quadraticCurveTo(x + wd * 0.3, top + 18, x + wd, h);
       cx.closePath(); cx.fill();
     }
   });

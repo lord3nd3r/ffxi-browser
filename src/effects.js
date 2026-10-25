@@ -145,9 +145,11 @@ function launchBolt(caster, target, color, impact, dur = 0.28) {
 }
 
 function impactStone(pos, big) {
-  spawnEffect(pos, { color: 0x9c7a4d, n: big ? 24 : 14, size: 0.3, life: 0.9, gravity: -9, spread: 1.1, up: [1.5, 3], y: 0.4, radius: 0.4 });   // chunks arcing up
-  spawnEffect(pos, { color: 0xcbb389, n: 10, size: 0.18, life: 0.7, gravity: 0.4, spread: 0.6, up: [0.1, 0.5], y: 0.3, radius: 0.5 });          // dust
+  spawnEffect(pos, { color: 0x9c7a4d, n: big ? 16 : 10, size: 0.32, life: 0.7, gravity: -16, spread: 0.2, up: [0.2, 0.8], y: 6.5, height: 1.5, radius: 0.9 }); // rocks fall
+  spawnEffect(pos, { color: 0x9c7a4d, n: big ? 18 : 10, size: 0.28, life: 0.85, gravity: -9, spread: 1.1, up: [1.5, 3], y: 0.4, radius: 0.4 });
+  spawnEffect(pos, { color: 0xcbb389, n: 10, size: 0.18, life: 0.7, gravity: 0.4, spread: 0.6, up: [0.1, 0.5], y: 0.3, radius: 0.5 });
   spawnRing(pos, 0xb08968, big ? 3.2 : 2.2);
+  spawnRune(pos, 0xc4a574, big ? 2.4 : 1.6);
   if (big) addShakeAt(pos, 0.25);
 }
 function impactBlizzard(pos) {
@@ -163,6 +165,7 @@ function impactFire(pos) {
 function pillar(pos, color, n = 14) {   // cure / banish / buff light column
   spawnGlow(pos, color, 1.8, 0.4);
   spawnEffect(pos, { color, n, size: 0.2, life: 1.1, gravity: 0.5, spread: 0.15, up: [1.2, 2.4], radius: 0.55, height: 1.4, y: 0.2, additive: true });
+  spawnRune(pos, color, 1.7);
 }
 function impactSleep(pos) {
   spawnEffect(pos, { color: 0xb197fc, n: 14, size: 0.22, life: 2.0, gravity: 0.35, spread: 0.2, up: [0.1, 0.4], radius: 0.6, y: 1.2, drag: 0.6 }); // drifting dust
@@ -197,7 +200,52 @@ export function weaponSkillEffect(target, power = 2) {
   spawnGlow(pos, 0xffd8a8, 1.2 + power * 0.5, 0.25);
   spawnEffect(pos, { color: 0xffa94d, n: Math.round(8 + power * 7), size: 0.24, life: 0.8, spread: 0.7 + power * 0.25, additive: true });
   spawnRing(pos, 0xffc078, 1.6 + power * 0.9, 0.4);
+  spawnSlash(pos, 0xffe0b0, 0.85 + power * 0.25);
   addShakeAt(pos, 0.08 + power * 0.07);
+}
+
+const slashes = [];
+function spawnSlash(pos, color, radius = 1) {
+  const geo = new THREE.TorusGeometry(radius, 0.045, 5, 22, Math.PI * 1.15);
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.95, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  m.position.set(pos.x, (pos.y || 0) + 1.05, pos.z);
+  m.rotation.set(rand(-0.5, 0.2), rand(0, Math.PI), 0.5);
+  S.scene.add(m);
+  slashes.push({ m, t: 0, life: 0.32 });
+}
+
+let runeTex = null;
+function getRuneTex() {
+  if (runeTex) return runeTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(64, 64, 46, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(64, 64, 30, 0, 7); ctx.stroke();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(64 + Math.cos(a) * 30, 64 + Math.sin(a) * 30);
+    ctx.lineTo(64 + Math.cos(a) * 46, 64 + Math.sin(a) * 46);
+    ctx.stroke();
+  }
+  runeTex = new THREE.CanvasTexture(c);
+  return runeTex;
+}
+function spawnRune(pos, color, scale = 1.6) {
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 28),
+    new THREE.MeshBasicMaterial({ map: getRuneTex(), color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(pos.x, S.heightAt(pos.x, pos.z) + 0.08, pos.z);
+  S.scene.add(m);
+  rings.push({ m, t: 0, life: 0.7, maxR: scale * 1.15 });
 }
 
 // =====================================================================
@@ -257,6 +305,22 @@ export function updateEffects(dt) {
       S.scene.remove(p.pts);
       p.pts.geometry.dispose(); p.pts.material.dispose();
       groups.splice(i, 1);
+    }
+  }
+
+  // weapon-skill arcs
+  for (let i = slashes.length - 1; i >= 0; i--) {
+    const s = slashes[i];
+    s.t += dt;
+    const k = s.t / s.life;
+    s.m.scale.setScalar(1 + k * 0.45);
+    s.m.rotation.y += dt * 2.4;
+    s.m.material.opacity = 0.95 * (1 - k);
+    if (s.t >= s.life) {
+      S.scene.remove(s.m);
+      s.m.geometry.dispose();
+      s.m.material.dispose();
+      slashes.splice(i, 1);
     }
   }
 

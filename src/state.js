@@ -9,6 +9,9 @@ export const S = {
   worldSize: 200,          // playable square is [-95, 95]
   time: 8.0,               // in-game hour 0..24
   day: 1,
+  zone: 'sanria',
+  zoneRoot: null,
+  grade: null,
 
   // entities
   player: null,

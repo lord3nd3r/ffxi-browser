@@ -175,19 +175,19 @@ export const QUESTS = {
   q_hares: {
     name: 'Plains of Plenty', giver: 'eustace', type: 'kill', target: 'hare', count: 4,
     reward: { gil: 250, exp: 80 },
-    offer: 'The sheep have gone mad and wandered off the farms — they\'re trampling the crops flat. Cull <b>4 Mad Sheep</b> south of town and I\'ll see you paid.',
+    offer: 'The sheep have gone mad out in West Sarutaria. Take the north gate and cull <b>4 Mad Sheep</b> on the south plains — I\'ll see you paid.',
     done: 'That\'s the spirit! The farmers will sleep easier. Here, as promised.',
   },
   q_logs: {
     name: 'Timber!', giver: 'galdric', type: 'collect', target: 'maple_log', count: 3,
     reward: { gil: 200, exp: 70, item: 'maple_club' },
-    offer: 'My lumber shipment never arrived. Bring me <b>3 Maple Logs</b> — you can chop them from the logging points in the eastern woods — and this fine club is yours.',
+    offer: 'My lumber shipment never arrived. The logging points are in the eastern woods of West Sarutaria, through the north gate. Bring me <b>3 Maple Logs</b> and this club is yours.',
     done: 'Ahh, good maple! Solid grain. Take the club — swing it in good health.',
   },
   q_scroll: {
     name: 'A Sealed Past', giver: 'father_odo', type: 'deliver', target: 'scholar', item: 'sealed_scroll',
     reward: { gil: 300, exp: 120 },
-    offer: 'An archaeologist named Renn camps by the old ruins to the southwest, past the goblin camps. Deliver this <b>sealed scroll</b> to her. Beware — the path is dangerous.',
+    offer: 'An archaeologist named Renn camps by the old ruins in West Sarutaria, southwest past the goblin camps. Leave by the north gate and deliver this <b>sealed scroll</b> to her. A violet light on the altar there opens the crypt.',
     done: '(Renn breaks the seal) …So the altar truly is Galkan. Fascinating! Thank you, adventurer — and do be careful, something monstrous prowls these ruins.',
     prereq: null,
   },

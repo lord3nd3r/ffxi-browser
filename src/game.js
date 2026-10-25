@@ -6,6 +6,8 @@ import { JOBS, ACTIONS, ITEMS, MONSTERS, SPAWNS, NPCS, QUESTS, RECIPES, VENDOR_S
 import { Entity, makeNameplate, spawnMonster, makeCharacterModel, setLoopAnim, playOnce } from './entities.js';
 import * as UI from './ui.js';
 import { env, resolveCollision, findOpenSpot, addCollider } from './world.js';
+import { changeZone, ensureScenery, zoneAt, activeBounds, portalFor, setZoneHooks, zoneLocked } from './zones.js';
+import { targetCursorTexture } from './look.js';
 import * as API from './api.js';
 import * as Socket from './socket.js';
 import * as Puppets from './puppets.js';
@@ -102,7 +104,7 @@ export function buildPlayerMesh() {
   if (p.mesh) { px = p.pos.x; pz = p.pos.z; S.scene.remove(p.mesh); }
   const group = giveModel(p, JOB_MODEL[p.job], { appearance: S.appearance });
   const plate = makeNameplate(S.charName, '#e8edf8', '', true);
-  plate.position.y = 2.05;
+  plate.position.y = 2.28;
   group.add(plate);
   p.plate = plate;
   group.position.set(px, S.heightAt(px, pz), pz);
@@ -116,7 +118,7 @@ function addCompanion(c, pos) {
   e.weaponItem = STARTER_WEAPON[c.job];
   applyJobStats(e, c.job, lvl);
   const plate = makeNameplate(c.name, '#cfe3f8', '', true);
-  plate.position.y = 2.05;
+  plate.position.y = 2.28;
   group.add(plate);
   e.plate = plate;
   group.position.set(pos.x, S.heightAt(pos.x, pos.z), pos.z);
@@ -130,7 +132,7 @@ function spawnAlly(c, spot) {
   const e = new Entity({ kind: 'npc', name: c.name, npc: { id: 'ally_' + c.name, name: c.name, role: 'ally', ally: c, x: spot.x, z: spot.z } });
   const group = giveModel(e, c.model, { appearance: c.appearance });
   const plate = makeNameplate(c.name, '#8fd3a8');
-  plate.position.y = 2.05;
+  plate.position.y = 2.28;
   group.add(plate);
   e.plate = plate;
   group.position.set(spot.x, S.heightAt(spot.x, spot.z), spot.z);
@@ -172,50 +174,22 @@ export function initGame(charData) {
   p.armorItem = S.equipPerJob[S.job].armor;
   applyJobStats(p, S.job, lvl);
   if (charData.savedVitals) { p.hp = charData.savedVitals.hp; p.mp = charData.savedVitals.mp; }
+  const startX = S.savedPos ? S.savedPos.x : 3;
+  const startZ = S.savedPos ? S.savedPos.z : 4;
+  ensureScenery(zoneAt(startX, startZ));
   buildPlayerMesh();
 
-  // companions: recruited allies join the party; the rest wait in town
+  // recruited companions travel with you; the others wait in Port Sanria
   S.party = [p];
   COMPANIONS.forEach((c, i) => {
-    if (S.recruited[c.name]) addCompanion(c, { x: 3 + (i + 1) * 1.6, z: 4 - (i + 1) * 1.2 });
-    else spawnAlly(c, { x: 6 - i * 6, z: 2 });   // waiting near the crystal, on clear ground
+    if (S.recruited[c.name]) addCompanion(c, { x: startX + 1.3 + i, z: startZ + 0.4 });
   });
 
-  // monsters
-  if (!(API.isEnabled() && API.getToken())) {
-    for (const sp of SPAWNS) {
-      for (let i = 0; i < sp.count; i++) {
-        const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * sp.area.r;
-        const spot = findOpenSpot(sp.area.x + Math.cos(a) * r, sp.area.z + Math.sin(a) * r);
-        spawnMonster(sp.monster, spot.x, spot.z);
-      }
-    }
-  }
-
-  // npcs
-  const NPC_MODEL = { eustace: 'Knight', mirelle: 'Mage', tarutaru: 'Barbarian', father_odo: 'Barbarian', galdric: 'Barbarian', scholar: 'Rogue_Hooded' };
-  const SKINS = [0xe8c8a8, 0xd8a87c, 0x9a6a4a], HAIRS = [0x4a2f1d, 0xc9a227, 0x23232e, 0x8b8b94], STYLES = ['Hair_SimpleParted', 'Hair_Buzzed', 'Hair_Long', 'Hair_Buns'];
-  for (const n of NPCS) {
-    const e = new Entity({ kind: 'npc', name: n.name, npc: n });
-    let hsh = 0;
-    for (const ch of n.id) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;   // stable per-NPC look
-    const appearance = { skin: SKINS[hsh % 3], hair: HAIRS[hsh % 4], hairStyle: STYLES[(hsh >> 2) % 4], beard: hsh % 5 === 0 };
-    const group = giveModel(e, NPC_MODEL[n.id] || 'Rogue', { scale: n.small ? 0.55 : 0.9, appearance });
-    const plate = makeNameplate(n.name, '#8fd3a8');
-    plate.position.y = n.small ? 1.6 : 2.35;
-    group.add(plate);
-    e.plate = plate;
-    const spot = findOpenSpot(n.x, n.z);   // never inside a stall, wall or boulder
-    group.position.set(spot.x, S.heightAt(spot.x, spot.z), spot.z);
-    group.rotation.y = rand(0, Math.PI * 2);
-    S.scene.add(group);
-    S.npcs.push(e);
-  }
-
-  buildNodes();
-
-  // target ring
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.9, 24), new THREE.MeshBasicMaterial({ color: 0xff4444, side: THREE.DoubleSide, transparent: true, opacity: 0.85 }));
+  // target ring — white cursor texture, tinted per target kind
+  const ring = new THREE.Mesh(
+    new THREE.CircleGeometry(1.2, 40),
+    new THREE.MeshBasicMaterial({ map: targetCursorTexture(), color: 0xff4444, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }),
+  );
   ring.rotation.x = -Math.PI / 2;
   ring.visible = false;
   S.scene.add(ring);
@@ -228,12 +202,99 @@ export function initGame(charData) {
   S.scene.add(marker);
   G.destMarker = marker;
 
+  spawnZoneActors(S.zone);
   UI.refreshHotbar();
   UI.updateTracker();
   UI.log(`Welcome to Vana'diel, ${S.charName}!`, 'sys');
-  if (!S.recruited.Garrick || !S.recruited.Lina) UI.log('Garrick and Lina wait by the crystal — speak with them to form a party. It\'s dangerous to go alone.', 'sys');
-  UI.log('Talk to Gate Guard Eustace at the north gate for work. Press M for your Magic Book, ? for help.', 'npc');
+  if (!S.recruited.Garrick || !S.recruited.Lina) UI.log('Garrick and Lina wait by the crystal in Port Sanria. Speak with them before you head out.', 'sys');
+  UI.log('The north gate leads to West Sarutaria. A violet light on the ruin altar opens Inner Horutoto. Press ? for help.', 'npc');
 }
+
+const NPC_LOOK = {
+  eustace: { model: 'Knight', skin: 0xd8a87c, hair: 0x4a2f1d, hairStyle: 'Hair_SimpleParted', beard: true, cape: 0x24345e },
+  mirelle: { model: 'Mage', skin: 0xe8c8a8, hair: 0xc9a227, hairStyle: 'Hair_Long', cape: 0x6e3a28 },
+  tarutaru: { model: 'Barbarian', skin: 0xf0d0b0, hair: 0x8b5a2b, hairStyle: 'Hair_Buns', cape: 0x6a3a88 },
+  father_odo: { model: 'Barbarian', skin: 0xd8a87c, hair: 0xdedad2, hairStyle: 'Hair_Buzzed', beard: true, cape: 0xf7f3ea },
+  galdric: { model: 'Barbarian', skin: 0x9a6a4a, hair: 0x3a2418, hairStyle: 'Hair_Buzzed', beard: true, cape: 0x5a4632 },
+  scholar: { model: 'Rogue_Hooded', skin: 0xe8c8a8, hair: 0x23232e, hairStyle: 'Hair_Long', cape: 0x886622 },
+};
+
+const DUNGEON_SPAWNS = [
+  { monster: 'bat', count: 5, area: { x: 500, z: 522, r: 8 } },
+  { monster: 'worm', count: 3, area: { x: 500, z: 536, r: 5 } },
+];
+
+function spawnMonsterList(list) {
+  for (const sp of list) {
+    for (let i = 0; i < sp.count; i++) {
+      const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * sp.area.r;
+      const spot = findOpenSpot(sp.area.x + Math.cos(a) * r, sp.area.z + Math.sin(a) * r);
+      spawnMonster(sp.monster, spot.x, spot.z);
+    }
+  }
+}
+
+function spawnNpcs(list) {
+  for (const n of list) {
+    const look = NPC_LOOK[n.id] || { model: 'Rogue', skin: 0xd8a87c, hair: 0x4a2f1d, hairStyle: 'Hair_SimpleParted' };
+    const e = new Entity({ kind: 'npc', name: n.name, npc: n });
+    const group = giveModel(e, look.model, {
+      scale: n.small ? 0.58 : 1,
+      appearance: { skin: look.skin, hair: look.hair, hairStyle: look.hairStyle, beard: !!look.beard, cape: look.cape },
+    });
+    const plate = makeNameplate(n.name, n.role === 'quest' ? '#f3e2a0' : '#d5eccf');
+    plate.position.y = n.small ? 1.7 : 2.55;
+    group.add(plate);
+    e.plate = plate;
+    if (n.role === 'quest') {
+      const mark = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.11),
+        new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: 0xffc44d, emissiveIntensity: 0.9 }),
+      );
+      mark.position.y = n.small ? 1.9 : 2.62;
+      group.add(mark);
+    }
+    const spot = findOpenSpot(n.x, n.z);
+    group.position.set(spot.x, S.heightAt(spot.x, spot.z), spot.z);
+    group.rotation.y = rand(0, Math.PI * 2);
+    S.scene.add(group);
+    S.npcs.push(e);
+  }
+}
+
+function clearZoneActors() {
+  const online = API.isEnabled() && API.getToken();
+  if (!online) {
+    for (const m of S.monsters) if (m.mesh) S.scene.remove(m.mesh);
+    S.monsters.length = 0;
+  } else {
+    for (const m of S.monsters) if (m.mesh) m.mesh.visible = zoneAt(m.pos.x, m.pos.z) === S.zone;
+  }
+  for (const n of S.npcs) if (n.mesh) S.scene.remove(n.mesh);
+  S.npcs.length = 0;
+  for (const nd of S.nodes) if (nd.mesh) S.scene.remove(nd.mesh);
+  S.nodes.length = 0;
+  if (S.target && S.target.kind !== 'player' && S.target.kind !== 'companion') S.target = null;
+}
+
+function spawnZoneActors(id) {
+  clearZoneActors();
+  const online = API.isEnabled() && API.getToken();
+  if (id === 'sanria') {
+    spawnNpcs(NPCS.filter(n => n.id !== 'scholar'));
+    COMPANIONS.forEach((c, i) => {
+      if (!S.recruited[c.name] && !S.party.some(p => p.name === c.name)) spawnAlly(c, { x: 6 - i * 5, z: 2 });
+    });
+  } else if (id === 'horutoto') {
+    if (!online) spawnMonsterList(DUNGEON_SPAWNS);
+  } else {
+    spawnNpcs(NPCS.filter(n => n.id === 'scholar'));
+    if (!online) spawnMonsterList(SPAWNS);
+    buildNodes();
+  }
+}
+
+setZoneHooks({ onEnter(id) { spawnZoneActors(id); } });
 
 function buildNodes() {
   let logIdx = 1, minIdx = 1, herbIdx = 1;
@@ -244,7 +305,7 @@ function buildNodes() {
       mesh = new THREE.Group();
       mesh.add(env('stump_A', 4)); // simplified fallback check
     } else if (type === 'mining') {
-      mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshStandardMaterial({ color: 0xb87333, flatShading: true, metalness: 0.5, roughness: 0.5 }));
+      mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshLambertMaterial({ color: 0x9a7b58, flatShading: true }));
       mesh.position.y = 0.4; mesh.castShadow = true;
       const g = new THREE.Group(); g.add(mesh); mesh = g;
     } else {
@@ -818,10 +879,10 @@ export function respawnPlayer() {
   }
   p.alive = true;
   p.hp = Math.round(p.maxhp * 0.6); p.mp = Math.round(p.maxmp * 0.6); p.tp = 0;
-  p.mesh.position.set(3, S.heightAt(3, 4), 4);
   p.mesh.rotation.z = 0;
   resetAnim(p);
   p.dest = null; setTarget(null);
+  changeZone('sanria', 3, 4);
   // anything still hunting the party (e.g. locked on a companion) goes home too
   for (const m of S.monsters) if (m.alive && m.aggroOn && m.aggroOn.isFriendly()) resetMonster(m);
   const jr = S.jobs[S.job];
@@ -856,7 +917,8 @@ function moveEntity(e, dirX, dirZ, dt, speedMul = 1) {
   const sp = e.speed * speedMul * (statsOf(e).speedMul || 1);
   let nx = e.pos.x + dirX * sp * dt;
   let nz = e.pos.z + dirZ * sp * dt;
-  nx = clamp(nx, -94, 94); nz = clamp(nz, -94, 94);
+  const b = activeBounds();
+  nx = clamp(nx, b.minX, b.maxX); nz = clamp(nz, b.minZ, b.maxZ);
   // static obstacles: trees, rocks, walls, props (circle/box push from world.js)
   const rc = resolveCollision(nx, nz);
   nx = rc.x; nz = rc.z;
@@ -1063,6 +1125,10 @@ function updatePlayer(dt) {
       if (d < 0.35) { p.dest = null; G.destMarker.visible = false; }
       else moveEntity(p, dx / d, dz / d, dt);
     }
+  }
+  if (p.alive && !zoneLocked()) {
+    const gate = portalFor(S.zone, p.pos.x, p.pos.z);
+    if (gate) changeZone(gate.id, gate.x, gate.z);
   }
 }
 
